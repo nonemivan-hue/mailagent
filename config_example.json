@@ -1,0 +1,54 @@
+{
+  "display_name": "Иванов И.И.",
+  "email": "user@company.ru",
+  "password": "your_password",
+  "remember_password": true,
+  "connection_type": "IMAP/SMTP",
+  "imap_username": "",
+  "smtp_username": "",
+  "imap_server": "imap.company.ru",
+  "imap_port": 993,
+  "imap_encryption": "SSL",
+  "imap_auth": "Обычный пароль",
+  "smtp_server": "smtp.company.ru",
+  "smtp_port": 587,
+  "smtp_encryption": "STARTTLS",
+  "smtp_auth": "Обычный пароль",
+  "manual_settings": true,
+  "signature": "С уважением,\nИванов И.И.",
+  "email_handling": "оставить",
+  "send_folder": "C:/MailProcessor/Отправка",
+  "receive_folder": "C:/MailProcessor/Получение",
+  "log_folder": "C:/MailProcessor/Логи",
+  "archive_enabled": true,
+  "archive_sent_folder": "C:/MailProcessor/Архив/Отправленные",
+  "archive_received_folder": "C:/MailProcessor/Архив/Полученные",
+  "archive_format": "zip",
+  "notification_enabled": false,
+  "notification_type": "email",
+  "notification_email": "admin@company.ru",
+  "notification_max_channel": "",
+  "auto_start": false,
+  "send_interval": 30,
+  "receive_interval": 30,
+  "send_enabled": true,
+  "receive_enabled": true,
+  "sent_folder": "Sent",
+  "save_sent_to_server": true,
+  "auto_folders": [
+    {
+      "path": "C:/MailProcessor/АвтоОтправка/Отчеты",
+      "email": "boss@company.ru",
+      "subject": "Ежедневный отчет",
+      "type": "send",
+      "multi_files": false
+    }
+  ],
+  "auto_receive_rules": [
+    {
+      "from_email": "client@partner.ru",
+      "folder": "C:/MailProcessor/Получение/ОтКлиента"
+    }
+  ],
+  "window_geometry": "1100x750+100+100"
+}

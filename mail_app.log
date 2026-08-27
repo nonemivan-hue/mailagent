@@ -1,0 +1,18 @@
+2026-08-11 13:52:16,458 - INFO - === Логирование запущено ===
+2026-08-11 13:52:16,459 - INFO - Папка логов: c:\mail3
+2026-08-11 13:52:16,460 - INFO - Файл логов: c:\mail3\mail_app.log
+2026-08-11 13:54:16,273 - INFO - IMAP connect: server=[imap.mail.ru], port=993, user=[uszn_gelen_obmen@mail.ru]
+2026-08-11 13:55:14,704 - INFO - IMAP connect: server=[imap.mail.ru], port=993, user=[uszn_gelen_obmen@mail.ru]
+2026-08-11 13:55:15,199 - INFO - SMTP connect: server=[smtp.mail.ru], port=465, user=[uszn_gelen_obmen@mail.ru]
+2026-08-11 14:04:49,763 - INFO - === Логирование запущено ===
+2026-08-11 14:04:49,764 - INFO - Папка логов: c:\mail3
+2026-08-11 14:04:49,766 - INFO - Файл логов: c:\mail3\mail_app.log
+2026-08-11 14:06:42,203 - INFO - IMAP connect: server=[imap.mail.ru], port=993, user=[uszn_gekn_obmen@mail.ru]
+2026-08-11 14:06:55,403 - INFO - IMAP connect: server=[imap.mail.ru], port=993, user=[uszn_gekn_obmen@mail.ru]
+2026-08-11 14:07:03,147 - INFO - IMAP connect: server=[imap.mail.ru], port=993, user=[uszn_gekn_obmen@mail.ru]
+2026-08-11 14:07:18,083 - INFO - IMAP connect: server=[imap.mail.ru], port=993, user=[uszn_gelen_obmen@mail.ruuszn_gekn_obmen@mail.ru]
+2026-08-11 14:07:54,698 - INFO - IMAP connect: server=[imap.mail.ru], port=993, user=[uszn_gelen_obmen@mail.ru]
+2026-08-11 14:07:55,230 - INFO - SMTP connect: server=[smtp.mail.ru], port=465, user=[uszn_gelen_obmen@mail.ru]
+2026-08-11 14:08:00,970 - INFO - Логи операций: отправка=D:\Mail\logs\sent_log.txt, прием=D:\Mail\logs\received_log.txt
+2026-08-11 14:08:00,977 - INFO - IMAP connect: server=[imap.mail.ru], port=993, user=[uszn_gelen_obmen@mail.ru]
+2026-08-11 14:08:01,314 - INFO - SMTP connect: server=[smtp.mail.ru], port=465, user=[uszn_gelen_obmen@mail.ru]

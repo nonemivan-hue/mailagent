@@ -1,0 +1,2939 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Автопроцессинг электронной почты
+GUI приложение на Python для автоматической отправки/приема писем
+При закрытии окна сворачивается в системный трей
+"""
+
+import os
+import sys
+import time
+import json
+import shutil
+import subprocess
+import zipfile
+import logging
+import threading
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog, scrolledtext
+from datetime import datetime, timedelta
+from email import message_from_bytes, policy
+from email.message import EmailMessage
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email.header import decode_header, Header
+from email.utils import formatdate, parseaddr
+from email.encoders import encode_base64
+import imaplib
+import smtplib
+import socket
+
+# Попытка импорта matplotlib для графика
+try:
+    import matplotlib
+    matplotlib.use('TkAgg')
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+
+# Попытка импорта pystray для системного трея
+try:
+    import pystray
+    from PIL import Image, ImageDraw
+    PYSTRAY_AVAILABLE = True
+except ImportError:
+    PYSTRAY_AVAILABLE = False
+
+# Константы
+CONFIG_FILE = "mail_config.json"
+LOG_FILE = "mail_app.log"
+STATS_FILE = "mail_stats.json"
+SENT_HISTORY_FILE = "sent_history.json"
+RECEIVED_HISTORY_FILE = "received_history.json"
+VERSION = "1.4.6"
+
+
+def normalize_path(path):
+    """Нормализация пути: UNC, абсолютный, с правильными слэшами"""
+    if not path:
+        return ""
+    path = path.strip()
+    path = os.path.normpath(path)
+    return path
+
+
+def create_tray_icon():
+    """Загрузка иконки для системного трея из файла icon.png"""
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png")
+    if os.path.exists(icon_path):
+        return Image.open(icon_path)
+    # Fallback — программная иконка
+    width = 64
+    height = 64
+    image = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+    dc = ImageDraw.Draw(image)
+    dc.ellipse([2, 2, width-2, height-2], fill=(0, 120, 215, 255))
+    dc.text((18, 14), "M", fill=(255, 255, 255, 255), font=None)
+    return image
+
+
+# Автоопределение настроек серверов по домену email
+AUTO_SERVER_CONFIGS = {
+    # Mail.ru
+    "mail.ru": {
+        "imap_server": "imap.mail.ru", "imap_port": 993, "imap_encryption": "SSL", "imap_auth": "Обычный пароль",
+        "smtp_server": "smtp.mail.ru", "smtp_port": 465, "smtp_encryption": "SSL", "smtp_auth": "Обычный пароль",
+        "sent_folder": "Sent"
+    },
+    "list.ru": {
+        "imap_server": "imap.mail.ru", "imap_port": 993, "imap_encryption": "SSL", "imap_auth": "Обычный пароль",
+        "smtp_server": "smtp.mail.ru", "smtp_port": 465, "smtp_encryption": "SSL", "smtp_auth": "Обычный пароль",
+        "sent_folder": "Sent"
+    },
+    "bk.ru": {
+        "imap_server": "imap.mail.ru", "imap_port": 993, "imap_encryption": "SSL", "imap_auth": "Обычный пароль",
+        "smtp_server": "smtp.mail.ru", "smtp_port": 465, "smtp_encryption": "SSL", "smtp_auth": "Обычный пароль",
+        "sent_folder": "Sent"
+    },
+    "inbox.ru": {
+        "imap_server": "imap.mail.ru", "imap_port": 993, "imap_encryption": "SSL", "imap_auth": "Обычный пароль",
+        "smtp_server": "smtp.mail.ru", "smtp_port": 465, "smtp_encryption": "SSL", "smtp_auth": "Обычный пароль",
+        "sent_folder": "Sent"
+    },
+    # Yandex
+    "yandex.ru": {
+        "imap_server": "imap.yandex.ru", "imap_port": 993, "imap_encryption": "SSL", "imap_auth": "Обычный пароль",
+        "smtp_server": "smtp.yandex.ru", "smtp_port": 465, "smtp_encryption": "SSL", "smtp_auth": "Обычный пароль",
+        "sent_folder": "Sent"
+    },
+    "ya.ru": {
+        "imap_server": "imap.yandex.ru", "imap_port": 993, "imap_encryption": "SSL", "imap_auth": "Обычный пароль",
+        "smtp_server": "smtp.yandex.ru", "smtp_port": 465, "smtp_encryption": "SSL", "smtp_auth": "Обычный пароль",
+        "sent_folder": "Sent"
+    },
+    # Gmail
+    "gmail.com": {
+        "imap_server": "imap.gmail.com", "imap_port": 993, "imap_encryption": "SSL", "imap_auth": "Обычный пароль",
+        "smtp_server": "smtp.gmail.com", "smtp_port": 465, "smtp_encryption": "SSL", "smtp_auth": "Обычный пароль",
+        "sent_folder": "[Gmail]/Sent Mail"
+    },
+    "googlemail.com": {
+        "imap_server": "imap.gmail.com", "imap_port": 993, "imap_encryption": "SSL", "imap_auth": "Обычный пароль",
+        "smtp_server": "smtp.gmail.com", "smtp_port": 465, "smtp_encryption": "SSL", "smtp_auth": "Обычный пароль",
+        "sent_folder": "[Gmail]/Sent Mail"
+    },
+    # Outlook / Hotmail / Live
+    "outlook.com": {
+        "imap_server": "outlook.office365.com", "imap_port": 993, "imap_encryption": "SSL", "imap_auth": "Обычный пароль",
+        "smtp_server": "smtp.office365.com", "smtp_port": 587, "smtp_encryption": "STARTTLS", "smtp_auth": "Обычный пароль",
+        "sent_folder": "Sent Items"
+    },
+    "hotmail.com": {
+        "imap_server": "outlook.office365.com", "imap_port": 993, "imap_encryption": "SSL", "imap_auth": "Обычный пароль",
+        "smtp_server": "smtp.office365.com", "smtp_port": 587, "smtp_encryption": "STARTTLS", "smtp_auth": "Обычный пароль",
+        "sent_folder": "Sent Items"
+    },
+    "live.com": {
+        "imap_server": "outlook.office365.com", "imap_port": 993, "imap_encryption": "SSL", "imap_auth": "Обычный пароль",
+        "smtp_server": "smtp.office365.com", "smtp_port": 587, "smtp_encryption": "STARTTLS", "smtp_auth": "Обычный пароль",
+        "sent_folder": "Sent Items"
+    },
+    # Rambler
+    "rambler.ru": {
+        "imap_server": "imap.rambler.ru", "imap_port": 993, "imap_encryption": "SSL", "imap_auth": "Обычный пароль",
+        "smtp_server": "smtp.rambler.ru", "smtp_port": 465, "smtp_encryption": "SSL", "smtp_auth": "Обычный пароль",
+        "sent_folder": "Sent"
+    },
+    # iCloud
+    "icloud.com": {
+        "imap_server": "imap.mail.me.com", "imap_port": 993, "imap_encryption": "SSL", "imap_auth": "Обычный пароль",
+        "smtp_server": "smtp.mail.me.com", "smtp_port": 587, "smtp_encryption": "STARTTLS", "smtp_auth": "Обычный пароль",
+        "sent_folder": "Sent Messages"
+    },
+    # Zoho
+    "zoho.com": {
+        "imap_server": "imap.zoho.com", "imap_port": 993, "imap_encryption": "SSL", "imap_auth": "Обычный пароль",
+        "smtp_server": "smtp.zoho.com", "smtp_port": 465, "smtp_encryption": "SSL", "smtp_auth": "Обычный пароль",
+        "sent_folder": "Sent"
+    },
+    # GMX
+    "gmx.com": {
+        "imap_server": "imap.gmx.com", "imap_port": 993, "imap_encryption": "SSL", "imap_auth": "Обычный пароль",
+        "smtp_server": "mail.gmx.com", "smtp_port": 587, "smtp_encryption": "STARTTLS", "smtp_auth": "Обычный пароль",
+        "sent_folder": "Sent"
+    },
+    # ProtonMail (через bridge)
+    "protonmail.com": {
+        "imap_server": "127.0.0.1", "imap_port": 1143, "imap_encryption": "Нет", "imap_auth": "Обычный пароль",
+        "smtp_server": "127.0.0.1", "smtp_port": 1025, "smtp_encryption": "Нет", "smtp_auth": "Обычный пароль",
+        "sent_folder": "Sent"
+    },
+}
+
+
+def get_auto_config(email):
+    """Определение настроек сервера по домену email"""
+    if not email or "@" not in email:
+        return None
+    domain = email.split("@")[1].lower().strip()
+    return AUTO_SERVER_CONFIGS.get(domain)
+
+
+class ConfigManager:
+    """Управление конфигурацией приложения"""
+
+    DEFAULT_CONFIG = {
+        "display_name": "",
+        "email": "",
+        "password": "",
+        "remember_password": True,
+        "connection_type": "IMAP/SMTP",
+        "imap_username": "",
+        "smtp_username": "",
+        "imap_server": "",
+        "imap_port": 993,
+        "imap_encryption": "SSL",
+        "imap_auth": "Обычный пароль",
+        "smtp_server": "",
+        "smtp_port": 587,
+        "smtp_encryption": "STARTTLS",
+        "smtp_auth": "Обычный пароль",
+        "manual_settings": False,
+        "signature": "",
+        "email_handling": "оставить",
+        "send_folder": "",
+        "receive_folder": "",
+        "log_folder": "",
+        "archive_enabled": False,
+        "archive_sent_folder": "",
+        "archive_received_folder": "",
+        "archive_format": "zip",
+        "notification_enabled": False,
+        "notification_type": "email",
+        "notification_email": "",
+        "notification_max_channel": "",
+        "auto_start": False,
+        "send_interval": 30,
+        "receive_interval": 30,
+        "send_enabled": True,
+        "receive_enabled": True,
+        "sent_folder": "Sent",
+        "save_sent_to_server": True,
+        "auto_folders": [],
+        "auto_receive_rules": [],
+        "window_geometry": "1100x750+100+100"
+    }
+
+    def __init__(self):
+        self.config = self.DEFAULT_CONFIG.copy()
+        self.load()
+
+    def load(self):
+        if os.path.exists(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+                    self.config.update(loaded)
+            except Exception as e:
+                logging.error(f"Ошибка загрузки конфигурации: {e}")
+
+    def save(self):
+        try:
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logging.error(f"Ошибка сохранения конфигурации: {e}")
+
+    def get(self, key, default=None):
+        return self.config.get(key, default)
+
+    def set(self, key, value):
+        self.config[key] = value
+        self.save()
+
+
+class StatsManager:
+    """Управление статистикой за все время"""
+
+    def __init__(self):
+        self.stats = {"sent": 0, "received": 0, "errors": 0, "sent_mb": 0.0, "received_mb": 0.0}
+        self.load()
+
+    def load(self):
+        if os.path.exists(STATS_FILE):
+            try:
+                with open(STATS_FILE, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+                    self.stats.update(loaded)
+            except Exception as e:
+                logging.error(f"Ошибка загрузки статистики: {e}")
+
+    def save(self):
+        try:
+            with open(STATS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.stats, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logging.error(f"Ошибка сохранения статистики: {e}")
+
+    def add_sent(self, count=1, mb=0.0):
+        self.stats["sent"] += count
+        self.stats["sent_mb"] += mb
+        self.save()
+
+    def add_received(self, count=1, mb=0.0):
+        self.stats["received"] += count
+        self.stats["received_mb"] += mb
+        self.save()
+
+    def add_error(self, count=1):
+        self.stats["errors"] += count
+        self.save()
+
+    def get(self):
+        return self.stats.copy()
+
+
+class HistoryManager:
+    """Управление историей отправленных и полученных писем (persistent storage)"""
+
+    def __init__(self):
+        self.sent = []
+        self.received = []
+        self.load()
+
+    def load(self):
+        if os.path.exists(SENT_HISTORY_FILE):
+            try:
+                with open(SENT_HISTORY_FILE, 'r', encoding='utf-8') as f:
+                    self.sent = json.load(f)
+            except Exception as e:
+                logging.error(f"Ошибка загрузки истории отправленных: {e}")
+                self.sent = []
+        if os.path.exists(RECEIVED_HISTORY_FILE):
+            try:
+                with open(RECEIVED_HISTORY_FILE, 'r', encoding='utf-8') as f:
+                    self.received = json.load(f)
+            except Exception as e:
+                logging.error(f"Ошибка загрузки истории полученных: {e}")
+                self.received = []
+
+    def save_sent(self):
+        try:
+            with open(SENT_HISTORY_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.sent, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logging.error(f"Ошибка сохранения истории отправленных: {e}")
+
+    def save_received(self):
+        try:
+            with open(RECEIVED_HISTORY_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.received, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logging.error(f"Ошибка сохранения истории полученных: {e}")
+
+    def add_sent(self, entry):
+        """entry: dict с ключами datetime, recipient, subject, attachments"""
+        self.sent.insert(0, entry)
+        self.save_sent()
+
+    def add_received(self, entry):
+        """entry: dict с ключами datetime, sender, subject, attachments"""
+        self.received.insert(0, entry)
+        self.save_received()
+
+    def get_sent(self):
+        return self.sent.copy()
+
+    def get_received(self):
+        return self.received.copy()
+
+
+class MailLogger:
+    """Логирование операций с письмами (sent_log.txt, received_log.txt)"""
+
+    def __init__(self, log_folder):
+        # Абсолютный путь к папке логов
+        if not log_folder:
+            log_folder = os.path.dirname(os.path.abspath(__file__))
+            if not log_folder:
+                log_folder = os.getcwd()
+        self.log_folder = os.path.abspath(log_folder.strip())
+        os.makedirs(self.log_folder, exist_ok=True)
+
+        self.sent_log = os.path.join(self.log_folder, "sent_log.txt")
+        self.received_log = os.path.join(self.log_folder, "received_log.txt")
+
+        # Записываем в технический лог, где находятся логи операций
+        logging.info(f"Логи операций: отправка={self.sent_log}, прием={self.received_log}")
+
+    def _write_log(self, filepath, line):
+        """Безопасная запись в лог-файл"""
+        try:
+            with open(filepath, 'a', encoding='utf-8') as f:
+                f.write(line + "\n")
+        except Exception as e:
+            logging.error(f"Ошибка записи в лог {filepath}: {e}")
+
+    def log_sent(self, recipient, attachments):
+        timestamp = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+        att_list = ", ".join(attachments) if attachments else "нет"
+        line = f"[{timestamp}] Получатель: {recipient} | Вложения: {att_list}"
+        self._write_log(self.sent_log, line)
+        logging.info(f"[ОТПРАВКА] {recipient} | {att_list}")
+        return {"datetime": timestamp, "recipient": recipient, "subject": "", "attachments": att_list}
+
+    def log_received(self, sender, subject, attachments):
+        timestamp = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+        att_list = ", ".join(attachments) if attachments else "нет"
+        line = f"[{timestamp}] Отправитель: {sender} | Тема: {subject} | Вложения: {att_list}"
+        self._write_log(self.received_log, line)
+        logging.info(f"[ПРИЕМ] {sender} | {subject} | {att_list}")
+        return {"datetime": timestamp, "sender": sender, "subject": subject, "attachments": att_list}
+
+    def log_error(self, operation, error_msg):
+        """Логирование ошибок операций"""
+        timestamp = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+        line = f"[{timestamp}] ОШИБКА [{operation}]: {error_msg}"
+        # Пишем в оба лога и в технический лог
+        self._write_log(self.sent_log, line)
+        self._write_log(self.received_log, line)
+        logging.error(f"[{operation}] {error_msg}")
+
+
+class MailProcessor:
+    """Обработка почты (IMAP/SMTP)"""
+
+    def __init__(self, config, logger, status_callback=None, tray_notify_callback=None, stats_manager=None, history_callback=None):
+        self.config = config
+        self.logger = logger
+        self.status_callback = status_callback
+        self.tray_notify_callback = tray_notify_callback
+        self.stats_manager = stats_manager
+        self.history_callback = history_callback
+        self.running = False
+        self.imap_conn = None
+        self.smtp_conn = None
+        self.stats = {"sent": 0, "received": 0, "errors": 0, "sent_mb": 0.0, "received_mb": 0.0}
+        self._lock = threading.Lock()
+
+    def _notify(self, msg):
+        if self.status_callback:
+            self.status_callback(msg)
+
+    def connect_imap(self):
+        try:
+            server = (self.config.get("imap_server") or "").strip().strip(".")
+            port = int(self.config.get("imap_port", 993))
+            encryption = self.config.get("imap_encryption", "SSL")
+
+            if not server:
+                raise ValueError("Имя IMAP-сервера не задано")
+
+            # Имя пользователя: imap_username если задано, иначе email
+            username = (self.config.get("imap_username", "") or "").strip()
+            if not username:
+                username = self.config.get("email", "")
+            password = self.config.get("password", "")
+
+            self._notify(f"IMAP: Подключение к [{server}]:{port} как {username}...")
+            logging.info(f"IMAP connect: server=[{server}], port={port}, user=[{username}]")
+
+            if encryption == "SSL":
+                self.imap_conn = imaplib.IMAP4_SSL(server, port)
+            elif encryption == "STARTTLS":
+                self.imap_conn = imaplib.IMAP4(server, port)
+                self.imap_conn.starttls()
+            else:
+                self.imap_conn = imaplib.IMAP4(server, port)
+
+            self.imap_conn.login(username, password)
+            self._notify(f"IMAP: Авторизован как {username}")
+            return True
+        except Exception as e:
+            self._notify(f"IMAP ошибка: {e}")
+            raise
+
+    def connect_smtp(self):
+        try:
+            server = (self.config.get("smtp_server") or "").strip().strip(".")
+            port = int(self.config.get("smtp_port", 587))
+            encryption = self.config.get("smtp_encryption", "STARTTLS")
+
+            if not server:
+                raise ValueError("Имя SMTP-сервера не задано")
+
+            username = (self.config.get("smtp_username", "") or "").strip()
+            if not username:
+                username = self.config.get("email", "")
+            password = self.config.get("password", "")
+
+            self._notify(f"SMTP: Подключение к [{server}]:{port} как {username}...")
+            logging.info(f"SMTP connect: server=[{server}], port={port}, user=[{username}]")
+
+            if encryption == "SSL":
+                self.smtp_conn = smtplib.SMTP_SSL(server, port)
+            else:
+                self.smtp_conn = smtplib.SMTP(server, port)
+                if encryption == "STARTTLS":
+                    self.smtp_conn.starttls()
+                    self.smtp_conn.ehlo()
+
+            self.smtp_conn.login(username, password)
+            self._notify(f"SMTP: Авторизован как {username}")
+            return True
+        except Exception as e:
+            self._notify(f"SMTP ошибка: {e}")
+            raise
+
+    def disconnect(self):
+        try:
+            if self.imap_conn:
+                self.imap_conn.logout()
+                self.imap_conn = None
+        except:
+            pass
+        try:
+            if self.smtp_conn:
+                self.smtp_conn.quit()
+                self.smtp_conn = None
+        except:
+            pass
+        self._notify("Отключено от сервера")
+
+    def _ensure_smtp_connected(self):
+        """Проверка и переподключение SMTP при необходимости"""
+        try:
+            # Проверяем, что соединение живое — пробуем NOOP
+            if self.smtp_conn:
+                try:
+                    self.smtp_conn.noop()
+                    return
+                except:
+                    self.smtp_conn = None
+        except:
+            self.smtp_conn = None
+        self.connect_smtp()
+
+    def _sendmail_with_retry(self, sender, recipients, msg_bytes, max_retries=3):
+        """Отправка письма с автоматическим переподключением при разрыве соединения"""
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                self._ensure_smtp_connected()
+                self.smtp_conn.sendmail(sender, recipients, msg_bytes)
+                return
+            except (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError,
+                    smtplib.SMTPException, OSError, ConnectionError) as e:
+                last_error = e
+                self._notify(f"SMTP: Ошибка отправки (попытка {attempt + 1}/{max_retries}): {e}")
+                self.smtp_conn = None
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+        raise last_error
+
+    def test_connection(self):
+        try:
+            self.connect_imap()
+            self.imap_conn.logout()
+            self.imap_conn = None
+
+            self.connect_smtp()
+            self.smtp_conn.quit()
+            self.smtp_conn = None
+
+            return True, "Все прошло успешно"
+        except Exception as e:
+            return False, str(e)
+
+    def _get_unique_filename(self, folder, filename):
+        base, ext = os.path.splitext(filename)
+        counter = 1
+        new_name = filename
+        while os.path.exists(os.path.join(folder, new_name)):
+            new_name = f"{base}_{counter:04d}{ext}"
+            counter += 1
+        return new_name
+
+    def _archive_email(self, folder, msg_data, attachments, email_type, email_address=""):
+        if not self.config.get("archive_enabled"):
+            return
+
+        if email_type == "sent":
+            archive_folder = self.config.get("archive_sent_folder", "").strip()
+        else:
+            archive_folder = self.config.get("archive_received_folder", "").strip()
+
+        if not archive_folder:
+            return
+
+        today_folder = os.path.join(archive_folder, datetime.now().strftime("%Y-%m-%d"))
+        os.makedirs(today_folder, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+
+        # Очищаем email для имени файла
+        safe_email = ""
+        if email_address:
+            safe_email = "".join(c for c in email_address if c.isalnum() or c in "@._-").strip(".")
+        if not safe_email:
+            safe_email = email_type
+
+        archive_name = f"{timestamp}_{safe_email}"
+
+        # Проверяем уникальность имени
+        counter = 1
+        original_name = archive_name
+        while os.path.exists(os.path.join(today_folder, f"{archive_name}.zip")):
+            archive_name = f"{original_name}_{counter:03d}"
+            counter += 1
+
+        if self.config.get("archive_format") == "zip":
+            zip_path = os.path.join(today_folder, f"{archive_name}.zip")
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for att_path in attachments:
+                    if os.path.exists(att_path):
+                        zf.write(att_path, os.path.basename(att_path))
+
+    def _save_to_sent_folder(self, msg, recipient):
+        """Сохранение отправленного письма в папку 'Отправленные' на IMAP-сервере"""
+        if not self.config.get("save_sent_to_server", True):
+            return
+
+        if not self.imap_conn:
+            self._notify("  IMAP не подключен — письмо не сохранено в отправленные")
+            return
+
+        # Убеждаемся что в сообщении есть From/To (нужно для IMAP append)
+        sender = self.config.get("email", "")
+        if 'From' not in msg:
+            msg['From'] = sender
+        if 'To' not in msg:
+            msg['To'] = recipient
+
+        sent_folder = self.config.get("sent_folder", "Sent").strip()
+        if not sent_folder:
+            sent_folder = "Sent"
+
+        try:
+            # Пробуем найти существующую папку (разные серверы называют по-разному)
+            folder_candidates = [sent_folder, "Sent", "Отправленные", "Sent Items", "INBOX.Sent", "\"[Gmail]/Sent Mail\""]
+            target_folder = None
+
+            for folder in folder_candidates:
+                try:
+                    status = self.imap_conn.status(f'"{folder}"', '(MESSAGES)')
+                    if status[0] == 'OK':
+                        target_folder = folder
+                        break
+                except:
+                    continue
+
+            if not target_folder:
+                # Создаем папку если не нашли
+                try:
+                    self.imap_conn.create(sent_folder)
+                    target_folder = sent_folder
+                    self._notify(f"  Создана папка отправленных: {target_folder}")
+                except Exception as e:
+                    self._notify(f"  Не удалось создать папку {sent_folder}: {e}")
+                    return
+
+            # Добавляем письмо в папку отправленных с флагом \Seen
+            msg_bytes = msg.as_bytes()
+            result = self.imap_conn.append(f'"{target_folder}"', r'\Seen', None, msg_bytes)
+            if result[0] == 'OK':
+                self._notify(f"  Сохранено в папку отправленных: {target_folder}")
+            else:
+                self._notify(f"  Ошибка сохранения в отправленные: {result}")
+
+        except Exception as e:
+            self._notify(f"  Ошибка сохранения в папку отправленных: {e}")
+            logging.warning(f"Не удалось сохранить в папку отправленных: {e}")
+
+    def _ensure_imap_connected(self):
+        """Проверка и восстановление IMAP-соединения"""
+        if not self.imap_conn:
+            self._notify("IMAP: Нет соединения, подключение...")
+            self.connect_imap()
+            return
+        try:
+            # Проверяем активность соединения через NOOP
+            status = self.imap_conn.noop()
+            if status[0] != 'OK':
+                raise Exception(f"NOOP вернул статус: {status[0]}")
+        except Exception:
+            self._notify("IMAP: Соединение неактивно, переподключение...")
+            # Принудительно обнуляем старое соединение перед созданием нового
+            try:
+                self.imap_conn.logout()
+            except:
+                pass
+            self.imap_conn = None
+            try:
+                self.connect_imap()
+            except Exception as e:
+                self._notify(f"IMAP: Не удалось переподключиться: {e}")
+                raise
+
+    def _ensure_smtp_connected(self):
+        """Проверка и восстановление SMTP-соединения"""
+        if not self.smtp_conn:
+            self._notify("SMTP: Нет соединения, подключение...")
+            self.connect_smtp()
+            return
+        try:
+            # Проверяем активность через EHLO
+            self.smtp_conn.ehlo()
+        except Exception:
+            self._notify("SMTP: Соединение неактивно, переподключение...")
+            try:
+                self.connect_smtp()
+            except Exception as e:
+                self._notify(f"SMTP: Не удалось переподключиться: {e}")
+                raise
+
+    def receive_emails(self):
+        try:
+            self._ensure_imap_connected()
+        except Exception:
+            return
+
+        receive_folder = normalize_path(self.config.get("receive_folder", ""))
+        if not receive_folder:
+            self._notify("Папка получения не задана")
+            return
+        if not os.path.isdir(receive_folder):
+            self._notify(f"Папка получения не существует: {receive_folder}")
+            try:
+                os.makedirs(receive_folder, exist_ok=True)
+                self._notify(f"  Создана: {receive_folder}")
+            except Exception as e:
+                self._notify(f"  Не удалось создать: {e}")
+                return
+        self._notify(f"Проверка входящих: {receive_folder}")
+
+        try:
+            try:
+                self.imap_conn.select("INBOX")
+            except Exception as e:
+                # Если select упал — соединение разорвано, пробуем переподключиться
+                self._notify(f"IMAP: Ошибка SELECT ({e}), переподключение...")
+                self.imap_conn = None
+                self._ensure_imap_connected()
+                self.imap_conn.select("INBOX")
+
+            _, data = self.imap_conn.search(None, "UNSEEN")
+
+            if not data or not data[0]:
+                return
+
+            msg_ids = data[0].split()
+
+            for msg_id in msg_ids:
+                try:
+                    _, msg_data = self.imap_conn.fetch(msg_id, "(RFC822)")
+                    if not msg_data or not msg_data[0]:
+                        continue
+
+                    raw_email = msg_data[0][1]
+                    msg = message_from_bytes(raw_email, policy=policy.default)
+
+                    sender = msg.get("From", "Unknown")
+                    subject = msg.get("Subject", "Без темы")
+                    date_str = msg.get("Date", "")
+
+                    # Декодирование темы
+                    decoded_subject = ""
+                    for part, charset in decode_header(subject):
+                        if isinstance(part, bytes):
+                            decoded_subject += part.decode(charset or 'utf-8', errors='ignore')
+                        else:
+                            decoded_subject += part
+
+                    # Декодирование отправителя
+                    decoded_sender = ""
+                    for part, charset in decode_header(sender):
+                        if isinstance(part, bytes):
+                            decoded_sender += part.decode(charset or 'utf-8', errors='ignore')
+                        else:
+                            decoded_sender += part
+
+                    # Извлечение email из отправителя для имени папки
+                    _, sender_email = parseaddr(decoded_sender)
+                    if not sender_email:
+                        sender_email = decoded_sender.replace(" ", "_").replace("<", "").replace(">", "")[:50]
+                    # Очищаем email от недопустимых символов для имени папки
+                    safe_email = "".join(c for c in sender_email if c.isalnum() or c in "@._-").strip(".")
+                    if not safe_email:
+                        safe_email = "unknown"
+
+                    # === Создание структуры папок ===
+                    # Папка дня: ГГГГ_ММ_ДД
+                    day_folder = os.path.join(receive_folder, datetime.now().strftime("%Y_%m_%d"))
+                    os.makedirs(day_folder, exist_ok=True)
+
+                    # Подпапка письма: время_почта (например: 14_35_22_ivanov@mail.ru)
+                    time_str = datetime.now().strftime("%H_%M_%S")
+                    letter_folder_name = f"{time_str}_{safe_email}"
+                    letter_folder = os.path.join(day_folder, letter_folder_name)
+                    counter = 1
+                    while os.path.exists(letter_folder):
+                        letter_folder = os.path.join(day_folder, f"{time_str}_{counter:03d}_{safe_email}")
+                        counter += 1
+                    os.makedirs(letter_folder)
+
+                    # === Извлечение тела письма и подписи ===
+                    body_text = ""
+                    signature_text = ""
+
+                    if msg.is_multipart():
+                        for part in msg.walk():
+                            if part.get_content_type() == "text/plain" and part.get_content_disposition() != "attachment":
+                                try:
+                                    text = part.get_content()
+                                except:
+                                    text = part.get_payload(decode=True)
+                                    if isinstance(text, bytes):
+                                        text = text.decode('utf-8', errors='ignore')
+
+                                if text:
+                                    # Разделяем тело и подпись (подпись обычно после -- или отделена пустой строкой)
+                                    lines = text.split("\n")
+                                    body_lines = []
+                                    sig_lines = []
+                                    in_signature = False
+
+                                    for line in lines:
+                                        stripped = line.strip()
+                                        if stripped == "--":
+                                            in_signature = True
+                                            continue
+                                        if in_signature:
+                                            sig_lines.append(line)
+                                        else:
+                                            body_lines.append(line)
+
+                                    body_text = "\n".join(body_lines).strip()
+                                    signature_text = "\n".join(sig_lines).strip()
+                                break
+                    else:
+                        try:
+                            text = msg.get_content()
+                        except:
+                            text = msg.get_payload(decode=True)
+                            if isinstance(text, bytes):
+                                text = text.decode('utf-8', errors='ignore')
+                        if text:
+                            lines = text.split("\n")
+                            body_lines = []
+                            sig_lines = []
+                            in_signature = False
+                            for line in lines:
+                                if line.strip() == "--":
+                                    in_signature = True
+                                    continue
+                                if in_signature:
+                                    sig_lines.append(line)
+                                else:
+                                    body_lines.append(line)
+                            body_text = "\n".join(body_lines).strip()
+                            signature_text = "\n".join(sig_lines).strip()
+
+                    if body_text is None:
+                        body_text = ""
+                    if signature_text is None:
+                        signature_text = ""
+
+                    # === Сохранение вложений ===
+                    attachments = []
+                    total_size = 0
+
+                    if msg.is_multipart():
+                        for part in msg.walk():
+                            if part.get_content_disposition() == "attachment":
+                                filename = part.get_filename()
+                                if filename:
+                                    decoded_filename = ""
+                                    for fn_part, fn_charset in decode_header(filename):
+                                        if isinstance(fn_part, bytes):
+                                            decoded_filename += fn_part.decode(fn_charset or 'utf-8', errors='ignore')
+                                        else:
+                                            decoded_filename += fn_part
+
+                                    unique_name = self._get_unique_filename(letter_folder, decoded_filename)
+                                    filepath = os.path.join(letter_folder, unique_name)
+
+                                    with open(filepath, 'wb') as f:
+                                        f.write(part.get_payload(decode=True))
+
+                                    attachments.append(unique_name)
+                                    total_size += os.path.getsize(filepath)
+
+                    # === Сохранение текстового файла с информацией ===
+                    received_time = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+                    sent_time = date_str if date_str else "неизвестно"
+
+                    txt_lines = []
+                    txt_lines.append(f"Отправитель: {decoded_sender}")
+                    txt_lines.append(f"Дата отправления: {sent_time}")
+                    txt_lines.append(f"Тема: {decoded_subject}")
+                    if attachments:
+                        txt_lines.append(f"Вложения: {', '.join(attachments)}")
+                    else:
+                        txt_lines.append("Вложения: нет")
+                    txt_lines.append("")
+                    txt_lines.append("=" * 50)
+                    txt_lines.append("СООБЩЕНИЕ:")
+                    txt_lines.append("=" * 50)
+                    txt_lines.append("")
+                    txt_lines.append(body_text)
+                    if signature_text:
+                        txt_lines.append("")
+                        txt_lines.append("=" * 50)
+                        txt_lines.append("ПОДПИСЬ:")
+                        txt_lines.append("=" * 50)
+                        txt_lines.append("")
+                        txt_lines.append(signature_text)
+
+                    txt_path = os.path.join(letter_folder, "письмо.txt")
+                    with open(txt_path, 'w', encoding='utf-8') as f:
+                        f.write("\n".join(txt_lines))
+
+                    total_size += os.path.getsize(txt_path)
+
+                    # Логирование
+                    log_entry = self.logger.log_received(decoded_sender, decoded_subject, attachments)
+
+                    # Архивация
+                    all_files = [os.path.join(letter_folder, f) for f in os.listdir(letter_folder)]
+                    self._archive_email(letter_folder, msg, all_files, "received", safe_email)
+
+                    with self._lock:
+                        self.stats["received"] += 1
+                        self.stats["received_mb"] += total_size / (1024 * 1024)
+
+                    if self.stats_manager:
+                        self.stats_manager.add_received(1, total_size / (1024 * 1024))
+
+                    if self.history_callback:
+                        self.history_callback("received", log_entry)
+
+                    handling = self.config.get("email_handling", "оставить")
+                    if handling == "удалить":
+                        self.imap_conn.store(msg_id, '+FLAGS', r'\Deleted')
+                    elif handling == "переместить":
+                        try:
+                            self.imap_conn.create("Processed")
+                        except:
+                            pass
+                        try:
+                            self.imap_conn.copy(msg_id, "Processed")
+                            self.imap_conn.store(msg_id, '+FLAGS', r'\Deleted')
+                        except:
+                            pass
+
+                    self._notify(f"Получено письмо от {decoded_sender} -> {letter_folder}")
+
+                    # Уведомление в трее
+                    if self.tray_notify_callback:
+                        try:
+                            self.tray_notify_callback(decoded_sender, decoded_subject)
+                        except Exception as e:
+                            logging.warning(f"Ошибка уведомления трея: {e}")
+
+                except Exception as e:
+                    with self._lock:
+                        self.stats["errors"] += 1
+                    logging.error(f"Ошибка обработки письма {msg_id}: {e}")
+                    if self.logger:
+                        self.logger.log_error("Прием письма", f"msg_id={msg_id}: {e}")
+                    if self.stats_manager:
+                        self.stats_manager.add_error(1)
+
+            self.imap_conn.expunge()
+
+        except Exception as e:
+            with self._lock:
+                self.stats["errors"] += 1
+            logging.error(f"Ошибка приема писем: {e}")
+            if self.logger:
+                self.logger.log_error("Прием писем", str(e))
+            if self.stats_manager:
+                self.stats_manager.add_error(1)
+            raise
+
+    def send_emails(self):
+        try:
+            self._ensure_smtp_connected()
+        except Exception:
+            return
+
+        send_folder = normalize_path(self.config.get("send_folder", ""))
+        if not send_folder:
+            self._notify("Папка отправки не задана")
+            return
+        os.makedirs(send_folder, exist_ok=True)
+
+        self._notify(f"Проверка папки отправки: {send_folder}")
+        items = os.listdir(send_folder)
+        self._notify(f"  Элементов в папке: {len(items)}")
+
+        for item in items:
+            item_path = os.path.join(send_folder, item)
+            if os.path.isdir(item_path):
+                recipient = item
+                files = [f for f in os.listdir(item_path) if os.path.isfile(os.path.join(item_path, f))]
+
+                if not files:
+                    continue
+
+                if self.config.get("send_folder_multi_files", False):
+                    # Отправляем все файлы одним письмом
+                    try:
+                        total_size = 0
+                        msg = EmailMessage()
+                        sender = self.config.get("email", "")
+                        msg['From'] = sender
+                        msg['To'] = recipient
+                        msg['Date'] = formatdate(localtime=True)
+                        msg['Subject'] = f"Вложения ({len(files)} шт.)"
+
+                        signature = self.config.get("signature", "")
+                        body = f"\n{signature}" if signature else ""
+                        msg.set_content(body)
+
+                        for filename in files:
+                            filepath = os.path.join(item_path, filename)
+                            total_size += os.path.getsize(filepath)
+                            with open(filepath, 'rb') as f:
+                                data = f.read()
+                            msg.add_attachment(data, maintype='application', subtype='octet-stream', filename=filename)
+
+                        self._sendmail_with_retry(sender, [recipient], msg.as_bytes())
+
+                        # Сохраняем в папку отправленных на сервере
+                        self._save_to_sent_folder(msg, recipient)
+
+                        log_entry = self.logger.log_sent(recipient, files)
+                        self._archive_email(send_folder, msg, [os.path.join(item_path, f) for f in files], "sent", recipient)
+
+                        for filename in files:
+                            os.remove(os.path.join(item_path, filename))
+
+                        with self._lock:
+                            self.stats["sent"] += 1
+                            self.stats["sent_mb"] += total_size / (1024 * 1024)
+
+                        if self.stats_manager:
+                            self.stats_manager.add_sent(1, total_size / (1024 * 1024))
+
+                        if self.history_callback:
+                            self.history_callback("sent", log_entry)
+
+                        self._notify(f"Отправлено письмо (несколько файлов) для {recipient}")
+
+                    except Exception as e:
+                        with self._lock:
+                            self.stats["errors"] += 1
+                        logging.error(f"Ошибка отправки нескольких файлов для {recipient}: {e}")
+                        if self.logger:
+                            self.logger.log_error("Отправка (multi)", f"{recipient}: {e}")
+                        if self.stats_manager:
+                            self.stats_manager.add_error(1)
+                else:
+                    # Отправляем каждый файл отдельным письмом
+                    for filename in files:
+                        try:
+                            filepath = os.path.join(item_path, filename)
+                            file_size = os.path.getsize(filepath)
+
+                            msg = EmailMessage()
+                            sender = self.config.get("email", "")
+                            msg['From'] = sender
+                            msg['To'] = recipient
+                            msg['Date'] = formatdate(localtime=True)
+                            msg['Subject'] = filename
+
+                            signature = self.config.get("signature", "")
+                            body = f"\n{signature}" if signature else ""
+                            msg.set_content(body)
+
+                            with open(filepath, 'rb') as f:
+                                data = f.read()
+                            msg.add_attachment(data, maintype='application', subtype='octet-stream', filename=filename)
+
+                            self._sendmail_with_retry(sender, [recipient], msg.as_bytes())
+
+                            # Сохраняем в папку отправленных на сервере
+                            self._save_to_sent_folder(msg, recipient)
+
+                            log_entry = self.logger.log_sent(recipient, [filename])
+                            self._archive_email(send_folder, msg, [filepath], "sent", recipient)
+                            os.remove(filepath)
+
+                            with self._lock:
+                                self.stats["sent"] += 1
+                                self.stats["sent_mb"] += file_size / (1024 * 1024)
+
+                            if self.stats_manager:
+                                self.stats_manager.add_sent(1, file_size / (1024 * 1024))
+
+                            if self.history_callback:
+                                self.history_callback("sent", log_entry)
+
+                            self._notify(f"Отправлено письмо для {recipient}")
+
+                        except Exception as e:
+                            with self._lock:
+                                self.stats["errors"] += 1
+                            logging.error(f"Ошибка отправки файла {filename}: {e}")
+                            if self.logger:
+                                self.logger.log_error("Отправка файла", f"{filename}: {e}")
+                            if self.stats_manager:
+                                self.stats_manager.add_error(1)
+
+        auto_folders = self.config.get("auto_folders", [])
+        for rule in auto_folders:
+            if rule.get("type") != "send":
+                continue
+            folder_path = rule.get("path", "")
+            recipient = rule.get("email", "")
+            subject = rule.get("subject", "")
+            multi_files = rule.get("multi_files", False)
+
+            if not folder_path or not os.path.isdir(folder_path) or not recipient:
+                continue
+
+            files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
+            if not files:
+                continue
+
+            if multi_files:
+                # Отправляем все файлы одним письмом
+                try:
+                    total_size = 0
+                    msg = EmailMessage()
+                    sender = self.config.get("email", "")
+                    msg['From'] = sender
+                    msg['To'] = recipient
+                    msg['Date'] = formatdate(localtime=True)
+                    subj = subject or "Вложения"
+                    msg['Subject'] = subj
+
+                    signature = self.config.get("signature", "")
+                    body = f"\n{signature}" if signature else ""
+                    msg.set_content(body)
+
+                    for filename in files:
+                        filepath = os.path.join(folder_path, filename)
+                        total_size += os.path.getsize(filepath)
+                        with open(filepath, 'rb') as f:
+                            data = f.read()
+                        msg.add_attachment(data, maintype='application', subtype='octet-stream', filename=filename)
+
+                    self._sendmail_with_retry(sender, [recipient], msg.as_bytes())
+                    self._save_to_sent_folder(msg, recipient)
+
+                    log_entry = self.logger.log_sent(recipient, files)
+                    self._archive_email(folder_path, msg, [os.path.join(folder_path, f) for f in files], "sent", recipient)
+
+                    for filename in files:
+                        os.remove(os.path.join(folder_path, filename))
+
+                    with self._lock:
+                        self.stats["sent"] += 1
+                        self.stats["sent_mb"] += total_size / (1024 * 1024)
+
+                    if self.stats_manager:
+                        self.stats_manager.add_sent(1, total_size / (1024 * 1024))
+
+                    if self.history_callback:
+                        self.history_callback("sent", log_entry)
+
+                    self._notify(f"Отправлено письмо (авто, несколько файлов) для {recipient}")
+
+                except Exception as e:
+                    with self._lock:
+                        self.stats["errors"] += 1
+                    logging.error(f"Ошибка авто-отправки нескольких файлов: {e}")
+                    if self.logger:
+                        self.logger.log_error("Авто-отправка (multi)", str(e))
+                    if self.stats_manager:
+                        self.stats_manager.add_error(1)
+            else:
+                # Отправляем каждый файл отдельным письмом
+                for filename in files:
+                    try:
+                        filepath = os.path.join(folder_path, filename)
+                        file_size = os.path.getsize(filepath)
+
+                        msg = EmailMessage()
+                        sender = self.config.get("email", "")
+                        msg['From'] = sender
+                        msg['To'] = recipient
+                        msg['Date'] = formatdate(localtime=True)
+                        subj = subject or filename
+                        msg['Subject'] = subj
+
+                        signature = self.config.get("signature", "")
+                        body = f"\n{signature}" if signature else ""
+                        msg.set_content(body)
+
+                        with open(filepath, 'rb') as f:
+                            data = f.read()
+                        msg.add_attachment(data, maintype='application', subtype='octet-stream', filename=filename)
+
+                        self._sendmail_with_retry(sender, [recipient], msg.as_bytes())
+
+                        # Сохраняем в папку отправленных на сервере
+                        self._save_to_sent_folder(msg, recipient)
+
+                        log_entry = self.logger.log_sent(recipient, [filename])
+                        self._archive_email(folder_path, msg, [filepath], "sent", recipient)
+                        os.remove(filepath)
+
+                        with self._lock:
+                            self.stats["sent"] += 1
+                            self.stats["sent_mb"] += file_size / (1024 * 1024)
+
+                        if self.stats_manager:
+                            self.stats_manager.add_sent(1, file_size / (1024 * 1024))
+
+                        if self.history_callback:
+                            self.history_callback("sent", log_entry)
+
+                        self._notify(f"Отправлено письмо (авто) для {recipient}")
+
+                    except Exception as e:
+                        with self._lock:
+                            self.stats["errors"] += 1
+                        logging.error(f"Ошибка авто-отправки {filename}: {e}")
+                        if self.logger:
+                            self.logger.log_error("Авто-отправка", f"{filename}: {e}")
+                        if self.stats_manager:
+                            self.stats_manager.add_error(1)
+
+    def process_auto_receive(self):
+        try:
+            self._ensure_imap_connected()
+        except Exception:
+            return
+
+        auto_rules = self.config.get("auto_receive_rules", [])
+        if not auto_rules:
+            return
+
+        try:
+            try:
+                self.imap_conn.select("INBOX")
+            except Exception as e:
+                # Если select упал — соединение разорвано, пробуем переподключиться
+                self._notify(f"IMAP: Ошибка SELECT ({e}), переподключение...")
+                self.imap_conn = None
+                self._ensure_imap_connected()
+                self.imap_conn.select("INBOX")
+
+            _, data = self.imap_conn.search(None, "UNSEEN")
+
+            if not data or not data[0]:
+                return
+
+            msg_ids = data[0].split()
+
+            for msg_id in msg_ids:
+                try:
+                    _, msg_data = self.imap_conn.fetch(msg_id, "(RFC822)")
+                    if not msg_data or not msg_data[0]:
+                        continue
+
+                    raw_email = msg_data[0][1]
+                    msg = message_from_bytes(raw_email, policy=policy.default)
+                    sender = msg.get("From", "")
+
+                    _, sender_email = parseaddr(sender)
+
+                    for rule in auto_rules:
+                        rule_email = rule.get("from_email", "")
+                        target_folder = rule.get("folder", "")
+
+                        if rule_email.lower() in sender_email.lower() and target_folder:
+                            target_folder = target_folder.strip()
+                            if target_folder:
+                                os.makedirs(target_folder, exist_ok=True)
+
+                            if msg.is_multipart():
+                                for part in msg.walk():
+                                    if part.get_content_disposition() == "attachment":
+                                        filename = part.get_filename()
+                                        if filename:
+                                            decoded_filename = ""
+                                            for fn_part, fn_charset in decode_header(filename):
+                                                if isinstance(fn_part, bytes):
+                                                    decoded_filename += fn_part.decode(fn_charset or 'utf-8', errors='ignore')
+                                                else:
+                                                    decoded_filename += fn_part
+
+                                            unique_name = self._get_unique_filename(target_folder, decoded_filename)
+                                            filepath = os.path.join(target_folder, unique_name)
+
+                                            with open(filepath, 'wb') as f:
+                                                f.write(part.get_payload(decode=True))
+
+                            self._notify(f"Авто-прием: письмо от {sender_email} -> {target_folder}")
+                            break
+
+                except Exception as e:
+                    logging.error(f"Ошибка авто-приема письма {msg_id}: {e}")
+
+            self.imap_conn.expunge()
+
+        except Exception as e:
+            logging.error(f"Ошибка авто-приема: {e}")
+
+    def run_cycle(self):
+        try:
+            if not self.imap_conn:
+                self.connect_imap()
+            if not self.smtp_conn:
+                self.connect_smtp()
+
+            if self.config.get("receive_enabled", True):
+                self.receive_emails()
+            else:
+                self._notify("Прием писем отключен в настройках")
+
+            if self.config.get("send_enabled", True):
+                self.send_emails()
+            else:
+                self._notify("Отправка писем отключена в настройках")
+
+            self.process_auto_receive()
+
+            send_int = self.config.get("send_interval", 30)
+            recv_int = self.config.get("receive_interval", 30)
+            self._notify(f"Цикл завершен. Следующая проверка через {min(send_int, recv_int)} сек")
+
+        except Exception as e:
+            err_msg = f"Ошибка цикла: {e}"
+            logging.error(err_msg)
+            if self.logger:
+                self.logger.log_error("Цикл обработки", str(e))
+            with self._lock:
+                self.stats["errors"] += 1
+            if self.stats_manager:
+                self.stats_manager.add_error(1)
+            try:
+                self.disconnect()
+            except:
+                pass
+
+    def start(self):
+        self.running = True
+        while self.running:
+            self.run_cycle()
+            # Используем минимальный интервал из настроек
+            interval = min(
+                self.config.get("send_interval", 30),
+                self.config.get("receive_interval", 30)
+            )
+            time.sleep(max(5, interval))
+
+    def stop(self):
+        self.running = False
+        self.disconnect()
+
+    def get_stats(self):
+        with self._lock:
+            return self.stats.copy()
+
+
+def bind_clipboard(widget):
+    """Привязка горячих клавиш буфера обмена к Entry/Text"""
+    def paste(event=None):
+        try:
+            text = widget.clipboard_get()
+            if isinstance(widget, tk.Entry):
+                widget.insert(tk.INSERT, text)
+            elif isinstance(widget, tk.Text):
+                widget.insert(tk.INSERT, text)
+        except tk.TclError:
+            pass
+        return 'break'
+
+    def copy_text(event=None):
+        try:
+            if isinstance(widget, tk.Entry):
+                if widget.selection_present():
+                    widget.clipboard_clear()
+                    widget.clipboard_append(widget.selection_get())
+            elif isinstance(widget, tk.Text):
+                if widget.tag_ranges(tk.SEL):
+                    widget.clipboard_clear()
+                    widget.clipboard_append(widget.get(tk.SEL_FIRST, tk.SEL_LAST))
+        except tk.TclError:
+            pass
+        return 'break'
+
+    def cut_text(event=None):
+        try:
+            if isinstance(widget, tk.Entry):
+                if widget.selection_present():
+                    widget.clipboard_clear()
+                    widget.clipboard_append(widget.selection_get())
+                    widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
+            elif isinstance(widget, tk.Text):
+                if widget.tag_ranges(tk.SEL):
+                    widget.clipboard_clear()
+                    widget.clipboard_append(widget.get(tk.SEL_FIRST, tk.SEL_LAST))
+                    widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
+        except tk.TclError:
+            pass
+        return 'break'
+
+    widget.bind('<Control-v>', paste)
+    widget.bind('<Control-V>', paste)
+    widget.bind('<Control-c>', copy_text)
+    widget.bind('<Control-C>', copy_text)
+    widget.bind('<Control-x>', cut_text)
+    widget.bind('<Control-X>', cut_text)
+    # Также поддержка Ctrl+Insert / Shift+Insert
+    widget.bind('<Shift-Insert>', paste)
+
+
+class DataTable:
+    """Таблица с фильтрами по столбцам и сортировкой"""
+
+    def __init__(self, parent, columns, col_names):
+        self.parent = parent
+        self.columns = columns
+        self.col_names = col_names
+        self.all_data = []  # список tuples
+        self.sort_col = None
+        self.sort_reverse = False
+
+        # Фрейм таблицы
+        self.frame = ttk.Frame(parent)
+        self.frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # === ПАНЕЛЬ ФИЛЬТРОВ ===
+        filter_frame = ttk.LabelFrame(self.frame, text="Фильтры", padding=5)
+        filter_frame.pack(fill=tk.X, pady=(0, 5))
+
+        self.filter_vars = {}
+        for i, (col, name) in enumerate(zip(columns, col_names)):
+            ttk.Label(filter_frame, text=f"{name}:").grid(row=0, column=i*2, sticky=tk.W, padx=(5, 0))
+            var = tk.StringVar()
+            entry = ttk.Entry(filter_frame, textvariable=var, width=18)
+            entry.grid(row=0, column=i*2+1, sticky=tk.W, padx=(0, 5))
+            self.filter_vars[col] = var
+            # Фильтрация при изменении текста
+            var.trace_add("write", lambda *args, c=col: self._apply_filters())
+
+        ttk.Button(filter_frame, text="Сброс фильтров", command=self._reset_filters).grid(
+            row=0, column=len(columns)*2, sticky=tk.W, padx=5)
+
+        # === ТАБЛИЦА ===
+        tree_frame = ttk.Frame(self.frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=8)
+        for col, name in zip(columns, col_names):
+            self.tree.heading(col, text=name, command=lambda c=col: self._sort_by(c))
+            self.tree.column(col, anchor=tk.W, width=150)
+
+        vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
+
+        # Статусная строка
+        self.lbl_status = ttk.Label(self.frame, text="Записей: 0", foreground="gray")
+        self.lbl_status.pack(anchor=tk.W, pady=(2, 0))
+
+    def _sort_by(self, col):
+        """Сортировка по столбцу"""
+        if self.sort_col == col:
+            self.sort_reverse = not self.sort_reverse
+        else:
+            self.sort_col = col
+            self.sort_reverse = False
+
+        col_idx = self.columns.index(col)
+        try:
+            # Пробуем числовую сортировку
+            self.all_data.sort(key=lambda x: float(x[col_idx]) if x[col_idx] else 0, reverse=self.sort_reverse)
+        except (ValueError, TypeError):
+            # Строковая сортировка
+            self.all_data.sort(key=lambda x: str(x[col_idx]).lower(), reverse=self.sort_reverse)
+
+        self._apply_filters()
+
+        # Обновляем заголовки с индикатором сортировки
+        for c, name in zip(self.columns, self.col_names):
+            indicator = ""
+            if c == self.sort_col:
+                indicator = " ▼" if self.sort_reverse else " ▲"
+            self.tree.heading(c, text=name + indicator)
+
+    def _apply_filters(self, *args):
+        """Применение фильтров по всем столбцам"""
+        filtered = []
+        for row in self.all_data:
+            match = True
+            for col, var in self.filter_vars.items():
+                query = var.get().strip().lower()
+                if query:
+                    col_idx = self.columns.index(col)
+                    if query not in str(row[col_idx]).lower():
+                        match = False
+                        break
+            if match:
+                filtered.append(row)
+
+        self._fill_tree(filtered)
+        self.lbl_status.configure(text=f"Записей: {len(filtered)} / {len(self.all_data)}")
+
+    def _reset_filters(self):
+        """Сброс всех фильтров"""
+        for var in self.filter_vars.values():
+            var.set("")
+        self._fill_tree(self.all_data)
+        self.lbl_status.configure(text=f"Записей: {len(self.all_data)}")
+
+    def _fill_tree(self, data):
+        """Заполнение Treeview данными"""
+        for i in self.tree.get_children():
+            self.tree.delete(i)
+        for item in data:
+            self.tree.insert("", tk.END, values=item)
+
+    def set_data(self, data):
+        """Установка полного набора данных"""
+        self.all_data = list(data)
+        self._apply_filters()
+
+    def add_item(self, values):
+        """Добавление одной записи в начало"""
+        self.all_data.insert(0, values)
+        self._apply_filters()
+
+
+class SettingsWindow:
+    """Окно настроек"""
+
+    def __init__(self, parent, config_manager):
+        self.parent = parent
+        self.config = config_manager
+        self.window = tk.Toplevel(parent)
+        self.window.title("Настройка учетной записи почты")
+        self.window.geometry("700x580")
+        self.window.minsize(650, 520)
+        self.window.resizable(True, True)
+        self.window.transient(parent)
+        self.window.grab_set()
+
+        self.create_widgets()
+        self.load_settings()
+        self._bind_all_clipboards()
+
+    def create_widgets(self):
+        # Notebook напрямую в окне — без Canvas/Scrollbar для компактности
+        notebook = ttk.Notebook(self.window)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        self.tab_connection = ttk.Frame(notebook)
+        notebook.add(self.tab_connection, text="Подключение")
+        self._create_connection_tab()
+
+        self.tab_paths = ttk.Frame(notebook)
+        notebook.add(self.tab_paths, text="Папки")
+        self._create_paths_tab()
+
+        self.tab_advanced = ttk.Frame(notebook)
+        notebook.add(self.tab_advanced, text="Дополнительно")
+        self._create_advanced_tab()
+
+        self.tab_archive = ttk.Frame(notebook)
+        notebook.add(self.tab_archive, text="Архивация")
+        self._create_archive_tab()
+
+        self.tab_notify = ttk.Frame(notebook)
+        notebook.add(self.tab_notify, text="Уведомления")
+        self._create_notify_tab()
+
+    def _create_connection_tab(self):
+        # Canvas + Scrollbar для прокрутки всех настроек подключения
+        canvas = tk.Canvas(self.tab_connection, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self.tab_connection, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", width=660)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Прокрутка колесом мыши
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        frame = scrollable_frame
+
+        # === ВЕРХНЯЯ ЧАСТЬ: Учетная запись ===
+        account_frame = ttk.LabelFrame(frame, text="Учетная запись", padding=10)
+        account_frame.pack(fill=tk.X, pady=(0, 10), padx=5)
+
+        # Ваше имя
+        ttk.Label(account_frame, text="Ваше имя:").grid(row=0, column=0, sticky=tk.W, pady=3)
+        self.entry_display_name = ttk.Entry(account_frame, width=35)
+        self.entry_display_name.grid(row=0, column=1, sticky=tk.W, pady=3)
+        ttk.Label(account_frame, text="Ваше имя, как оно отображается у других",
+                 foreground="gray", font=("Arial", 8)).grid(row=0, column=2, sticky=tk.W, padx=(10,0), pady=3)
+
+        # Адрес эл. почты
+        ttk.Label(account_frame, text="Адрес эл. почты:").grid(row=1, column=0, sticky=tk.W, pady=3)
+
+        email_frame = ttk.Frame(account_frame)
+        email_frame.grid(row=1, column=1, sticky=tk.W, pady=3)
+
+        self.entry_email = ttk.Entry(email_frame, width=28)
+        self.entry_email.pack(side=tk.LEFT)
+
+        ttk.Button(email_frame, text="Авто", width=6,
+                  command=self._auto_detect_settings).pack(side=tk.LEFT, padx=(5,0))
+
+        # Пароль
+        ttk.Label(account_frame, text="Пароль:").grid(row=2, column=0, sticky=tk.W, pady=3)
+        self.entry_password = ttk.Entry(account_frame, width=35, show="*")
+        self.entry_password.grid(row=2, column=1, sticky=tk.W, pady=3)
+
+        # Запомнить пароль
+        self.var_remember = tk.BooleanVar(value=True)
+        ttk.Checkbutton(account_frame, text="Запомнить пароль", variable=self.var_remember).grid(
+            row=3, column=1, sticky=tk.W, pady=3)
+
+        # Подсказка об имени пользователя
+        hint = ttk.Label(account_frame, text='Если имя пользователя отличается от email — укажите его ниже в полях "Имя пользователя"',
+                        foreground="darkorange", font=("Arial", 8))
+        hint.grid(row=4, column=0, columnspan=3, sticky=tk.W, pady=(5,0))
+
+        # === СРЕДНЯЯ ЧАСТЬ: Настройки сервера ===
+        server_frame = ttk.LabelFrame(frame, text="Настройки сервера", padding=10)
+        server_frame.pack(fill=tk.X, pady=(0, 10), padx=5)
+
+        # Заголовки таблицы
+        ttk.Label(server_frame, text="", width=10).grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(server_frame, text="Имя сервера", width=25).grid(row=0, column=1, sticky=tk.W)
+        ttk.Label(server_frame, text="Порт", width=6).grid(row=0, column=2, sticky=tk.W, padx=(5,0))
+        ttk.Label(server_frame, text="SSL", width=12).grid(row=0, column=3, sticky=tk.W, padx=(5,0))
+        ttk.Label(server_frame, text="Аутентификация", width=18).grid(row=0, column=4, sticky=tk.W, padx=(5,0))
+
+        # Разделитель
+        ttk.Separator(server_frame, orient=tk.HORIZONTAL).grid(row=1, column=0, columnspan=5, sticky=tk.EW, pady=3)
+
+        # --- Входящая (IMAP/POP3) ---
+        ttk.Label(server_frame, text="Входящая:").grid(row=2, column=0, sticky=tk.W, pady=4)
+
+        # Frame для типа + имени сервера (в одной ячейке column=1)
+        incoming_frame = ttk.Frame(server_frame)
+        incoming_frame.grid(row=2, column=1, sticky=tk.W+tk.E, pady=4)
+
+        self.combo_incoming_type = ttk.Combobox(incoming_frame, values=["IMAP", "POP3"], width=8, state="readonly")
+        self.combo_incoming_type.pack(side=tk.LEFT, padx=(0, 3))
+        self.combo_incoming_type.set("IMAP")
+        self.combo_incoming_type.bind("<<ComboboxSelected>>", self._on_conn_type_change)
+
+        self.entry_imap_server = ttk.Entry(incoming_frame, width=22)
+        self.entry_imap_server.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.entry_imap_port = ttk.Entry(server_frame, width=6)
+        self.entry_imap_port.grid(row=2, column=2, sticky=tk.W, pady=4, padx=(5,0))
+        self.entry_imap_port.insert(0, "143")
+
+        self.combo_imap_enc = ttk.Combobox(server_frame, values=["STARTTLS", "SSL", "Нет"], width=12, state="readonly")
+        self.combo_imap_enc.grid(row=2, column=3, sticky=tk.W, pady=4, padx=(5,0))
+        self.combo_imap_enc.set("STARTTLS")
+
+        self.combo_imap_auth = ttk.Combobox(server_frame, values=["Обычный пароль", "Kerberos/GSSAPI", "NTLM"], width=18, state="readonly")
+        self.combo_imap_auth.grid(row=2, column=4, sticky=tk.W, pady=4, padx=(5,0))
+        self.combo_imap_auth.set("Обычный пароль")
+
+        # --- Исходящая (SMTP) ---
+        ttk.Label(server_frame, text="Исходящая:").grid(row=3, column=0, sticky=tk.W, pady=4)
+
+        outgoing_frame = ttk.Frame(server_frame)
+        outgoing_frame.grid(row=3, column=1, sticky=tk.W+tk.E, pady=4)
+
+        self.combo_outgoing_type = ttk.Combobox(outgoing_frame, values=["SMTP"], width=8, state="readonly")
+        self.combo_outgoing_type.pack(side=tk.LEFT, padx=(0, 3))
+        self.combo_outgoing_type.set("SMTP")
+
+        self.entry_smtp_server = ttk.Entry(outgoing_frame, width=22)
+        self.entry_smtp_server.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.entry_smtp_port = ttk.Entry(server_frame, width=6)
+        self.entry_smtp_port.grid(row=3, column=2, sticky=tk.W, pady=4, padx=(5,0))
+        self.entry_smtp_port.insert(0, "587")
+
+        self.combo_smtp_enc = ttk.Combobox(server_frame, values=["STARTTLS", "SSL", "Нет"], width=12, state="readonly")
+        self.combo_smtp_enc.grid(row=3, column=3, sticky=tk.W, pady=4, padx=(5,0))
+        self.combo_smtp_enc.set("STARTTLS")
+
+        self.combo_smtp_auth = ttk.Combobox(server_frame, values=["Обычный пароль", "Kerberos/GSSAPI", "NTLM"], width=18, state="readonly")
+        self.combo_smtp_auth.grid(row=3, column=4, sticky=tk.W, pady=4, padx=(5,0))
+        self.combo_smtp_auth.set("Обычный пароль")
+
+        # --- Имя пользователя ---
+        user_frame = ttk.Frame(server_frame)
+        user_frame.grid(row=4, column=0, columnspan=5, sticky=tk.W+tk.E, pady=(8,0))
+
+        ttk.Label(user_frame, text="Имя пользователя:").pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Label(user_frame, text="Входящая:").pack(side=tk.LEFT, padx=(0, 3))
+        self.entry_imap_username = ttk.Entry(user_frame, width=25)
+        self.entry_imap_username.pack(side=tk.LEFT, padx=(0, 15))
+        ttk.Label(user_frame, text="Исходящая:").pack(side=tk.LEFT, padx=(0, 3))
+        self.entry_smtp_username = ttk.Entry(user_frame, width=25)
+        self.entry_smtp_username.pack(side=tk.LEFT)
+
+        # === НИЖНЯЯ ЧАСТЬ: Кнопки ===
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill=tk.X, pady=(10, 0), padx=5)
+
+        ttk.Button(btn_frame, text="Получить новую учетную запись",
+                  command=self._get_new_account).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="Дополнительная настройка",
+                  command=self._advanced_settings).pack(side=tk.LEFT, padx=2)
+
+        # Правая группа кнопок
+        right_btns = ttk.Frame(btn_frame)
+        right_btns.pack(side=tk.RIGHT)
+
+        ttk.Button(right_btns, text="Перетестировать",
+                  command=self._test_connection).pack(side=tk.LEFT, padx=2)
+        ttk.Button(right_btns, text="Готово",
+                  command=self.save_settings).pack(side=tk.LEFT, padx=2)
+        ttk.Button(right_btns, text="Отмена",
+                  command=self.window.destroy).pack(side=tk.LEFT, padx=2)
+
+    def _create_paths_tab(self):
+        frame = ttk.Frame(self.tab_paths)
+        frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        ttk.Label(frame, text="Папка отправки (подпапки = email адреса):").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.entry_send_folder = ttk.Entry(frame, width=50)
+        self.entry_send_folder.grid(row=0, column=1, sticky=tk.W, pady=2)
+        ttk.Button(frame, text="Обзор...", command=lambda: self._browse_folder(self.entry_send_folder)).grid(row=0, column=2, padx=5)
+
+        # Галочка "Отправлять несколько файлов одним письмом" для основной папки
+        self.var_send_multi = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame, text="Отправлять несколько файлов одним письмом (из основной папки)",
+                        variable=self.var_send_multi).grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=2, padx=5)
+
+        # Галочка "Включить отправку"
+        self.var_send_enabled = tk.BooleanVar(value=True)
+        ttk.Checkbutton(frame, text="Включить отправку писем", variable=self.var_send_enabled).grid(
+            row=2, column=0, columnspan=3, sticky=tk.W, pady=2, padx=5)
+
+        ttk.Label(frame, text="Папка получения:").grid(row=3, column=0, sticky=tk.W, pady=2)
+        self.entry_receive_folder = ttk.Entry(frame, width=50)
+        self.entry_receive_folder.grid(row=3, column=1, sticky=tk.W, pady=2)
+        ttk.Button(frame, text="Обзор...", command=lambda: self._browse_folder(self.entry_receive_folder)).grid(row=3, column=2, padx=5)
+
+        # Галочка "Включить прием"
+        self.var_receive_enabled = tk.BooleanVar(value=True)
+        ttk.Checkbutton(frame, text="Включить прием писем", variable=self.var_receive_enabled).grid(
+            row=4, column=0, columnspan=3, sticky=tk.W, pady=2, padx=5)
+
+        ttk.Label(frame, text="Папка логирования:").grid(row=5, column=0, sticky=tk.W, pady=2)
+        self.entry_log_folder = ttk.Entry(frame, width=50)
+        self.entry_log_folder.grid(row=5, column=1, sticky=tk.W, pady=2)
+        ttk.Button(frame, text="Обзор...", command=lambda: self._browse_folder(self.entry_log_folder)).grid(row=5, column=2, padx=5)
+
+        ttk.Separator(frame, orient=tk.HORIZONTAL).grid(row=6, column=0, columnspan=3, sticky=tk.EW, pady=10)
+
+        ttk.Label(frame, text="Дополнительные папки автопроцессинга:", font=("Arial", 10, "bold")).grid(row=7, column=0, columnspan=3, sticky=tk.W, pady=5)
+
+        self.auto_folders_list = tk.Listbox(frame, width=70, height=8)
+        self.auto_folders_list.grid(row=8, column=0, columnspan=3, pady=5)
+        self.auto_folders_list.bind('<Double-Button-1>', self._edit_auto_folder)
+
+        # Подсказка о редактировании
+        ttk.Label(frame, text="Двойной клик — редактировать, одинарный — выбрать", 
+                 foreground="gray", font=("Arial", 8)).grid(row=8, column=0, columnspan=3, sticky=tk.S, pady=(0,2))
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=9, column=0, columnspan=3, pady=5)
+
+        ttk.Button(btn_frame, text="Добавить отправку", command=self._add_auto_send).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Добавить прием", command=self._add_auto_receive).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Удалить", command=self._remove_auto_folder).pack(side=tk.LEFT, padx=5)
+
+    def _create_archive_tab(self):
+        frame = ttk.Frame(self.tab_archive)
+        frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        self.var_archive = tk.BooleanVar()
+        ttk.Checkbutton(frame, text="Включить архивацию", variable=self.var_archive).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=5)
+
+        ttk.Label(frame, text="Папка архивации отправленных:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.entry_archive_sent = ttk.Entry(frame, width=50)
+        self.entry_archive_sent.grid(row=1, column=1, sticky=tk.W, pady=2)
+        ttk.Button(frame, text="Обзор...", command=lambda: self._browse_folder(self.entry_archive_sent)).grid(row=1, column=2, padx=5)
+
+        ttk.Label(frame, text="Папка архивации полученных:").grid(row=2, column=0, sticky=tk.W, pady=2)
+        self.entry_archive_received = ttk.Entry(frame, width=50)
+        self.entry_archive_received.grid(row=2, column=1, sticky=tk.W, pady=2)
+        ttk.Button(frame, text="Обзор...", command=lambda: self._browse_folder(self.entry_archive_received)).grid(row=2, column=2, padx=5)
+
+        ttk.Label(frame, text="Формат архива:").grid(row=3, column=0, sticky=tk.W, pady=2)
+        self.combo_archive_format = ttk.Combobox(frame, values=["zip", "7z"], width=10, state="readonly")
+        self.combo_archive_format.grid(row=3, column=1, sticky=tk.W, pady=2)
+        self.combo_archive_format.set("zip")
+
+    def _create_notify_tab(self):
+        frame = ttk.Frame(self.tab_notify)
+        frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        self.var_notify = tk.BooleanVar()
+        ttk.Checkbutton(frame, text="Включить уведомления об ошибках", variable=self.var_notify).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=5)
+
+        ttk.Label(frame, text="Способ уведомления:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.combo_notify_type = ttk.Combobox(frame, values=["email", "max"], width=20, state="readonly")
+        self.combo_notify_type.grid(row=1, column=1, sticky=tk.W, pady=2)
+        self.combo_notify_type.set("email")
+
+        ttk.Label(frame, text="Email для уведомлений:").grid(row=2, column=0, sticky=tk.W, pady=2)
+        self.entry_notify_email = ttk.Entry(frame, width=50)
+        self.entry_notify_email.grid(row=2, column=1, sticky=tk.W, pady=2)
+
+        ttk.Label(frame, text="Канал MAX:").grid(row=3, column=0, sticky=tk.W, pady=2)
+        self.entry_notify_max = ttk.Entry(frame, width=50)
+        self.entry_notify_max.grid(row=3, column=1, sticky=tk.W, pady=2)
+
+    def _create_advanced_tab(self):
+        frame = ttk.Frame(self.tab_advanced)
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Интервалы проверки
+        interval_frame = ttk.LabelFrame(frame, text="Интервалы проверки (секунды)", padding=10)
+        interval_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(interval_frame, text="Интервал отправки:").grid(row=0, column=0, sticky=tk.W, pady=3)
+        self.entry_send_interval = ttk.Entry(interval_frame, width=10)
+        self.entry_send_interval.grid(row=0, column=1, sticky=tk.W, pady=3, padx=(5, 20))
+        self.entry_send_interval.insert(0, "30")
+
+        ttk.Label(interval_frame, text="Интервал приема:").grid(row=0, column=2, sticky=tk.W, pady=3)
+        self.entry_receive_interval = ttk.Entry(interval_frame, width=10)
+        self.entry_receive_interval.grid(row=0, column=3, sticky=tk.W, pady=3, padx=5)
+        self.entry_receive_interval.insert(0, "30")
+
+        # Папка отправленных на сервере
+        sent_frame = ttk.LabelFrame(frame, text="Папка отправленных на сервере", padding=10)
+        sent_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(sent_frame, text="Имя папки:").grid(row=0, column=0, sticky=tk.W, pady=3)
+        self.entry_sent_folder = ttk.Entry(sent_frame, width=35)
+        self.entry_sent_folder.grid(row=0, column=1, sticky=tk.W, pady=3, padx=5)
+        self.entry_sent_folder.insert(0, "Sent")
+
+        self.var_save_sent = tk.BooleanVar(value=True)
+        ttk.Checkbutton(sent_frame, text="Сохранять отправленные письма на сервере",
+                        variable=self.var_save_sent).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=5)
+
+        # Подпись
+        sig_frame = ttk.LabelFrame(frame, text="Подпись для исходящих писем", padding=10)
+        sig_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        self.text_signature = tk.Text(sig_frame, width=50, height=4, wrap=tk.WORD)
+        self.text_signature.pack(fill=tk.BOTH, expand=True)
+
+    def _browse_folder(self, entry):
+        folder = filedialog.askdirectory()
+        if folder:
+            entry.delete(0, tk.END)
+            entry.insert(0, folder)
+
+    def _on_conn_type_change(self, event=None):
+        conn_type = self.combo_incoming_type.get()
+        if conn_type == "IMAP":
+            self.entry_imap_port.delete(0, tk.END)
+            self.entry_imap_port.insert(0, "143")
+        elif conn_type == "POP3":
+            self.entry_imap_port.delete(0, tk.END)
+            self.entry_imap_port.insert(0, "995")
+
+    def _toggle_manual(self):
+        """Переключение ручных настроек (заглушка для совместимости)"""
+        pass
+
+    def _test_connection(self):
+        temp_config = ConfigManager()
+        temp_config.config["email"] = self.entry_email.get()
+        temp_config.config["password"] = self.entry_password.get()
+        temp_config.config["imap_server"] = (self.entry_imap_server.get() or "").strip().strip(".")
+        temp_config.config["imap_port"] = self.entry_imap_port.get()
+        temp_config.config["imap_encryption"] = self.combo_imap_enc.get()
+        temp_config.config["imap_username"] = self.entry_imap_username.get()
+        temp_config.config["smtp_server"] = (self.entry_smtp_server.get() or "").strip().strip(".")
+        temp_config.config["smtp_port"] = self.entry_smtp_port.get()
+        temp_config.config["smtp_encryption"] = self.combo_smtp_enc.get()
+        temp_config.config["smtp_username"] = self.entry_smtp_username.get()
+
+        imap_srv = temp_config.config["imap_server"]
+        smtp_srv = temp_config.config["smtp_server"]
+        imap_user = (self.entry_imap_username.get() or "").strip() or self.entry_email.get()
+        smtp_user = (self.entry_smtp_username.get() or "").strip() or self.entry_email.get()
+
+        if not imap_srv:
+            messagebox.showwarning("Проверка подключения", "Имя IMAP-сервера не задано")
+            return
+        if not smtp_srv:
+            messagebox.showwarning("Проверка подключения", "Имя SMTP-сервера не задано")
+            return
+
+        processor = MailProcessor(temp_config, None)
+        try:
+            success, msg = processor.test_connection()
+            if success:
+                messagebox.showinfo("Проверка подключения", 
+                    f"Все прошло успешно!\n\nIMAP: {imap_user}@{imap_srv}\nSMTP: {smtp_user}@{smtp_srv}")
+            else:
+                messagebox.showerror("Ошибка подключения", 
+                    f"Не удалось подключиться.\n\nПроверьте:\n- Пароль\n- Имя пользователя (Входящая: {imap_user}, Исходящая: {smtp_user})\n- Настройки сервера\n\nОшибка: {msg}")
+        except Exception as e:
+            messagebox.showerror("Ошибка подключения", 
+                f"Не удалось подключиться.\n\nПроверьте:\n- Пароль\n- Имя пользователя (Входящая: {imap_user}, Исходящая: {smtp_user})\n- Настройки сервера\n\nОшибка: {e}")
+
+    def _add_auto_send(self):
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Добавить папку отправки")
+        dialog.geometry("450x250")
+        dialog.transient(self.window)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text="Путь к папке:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        entry_path = ttk.Entry(dialog, width=40)
+        entry_path.grid(row=0, column=1, pady=5)
+        ttk.Button(dialog, text="Обзор...", command=lambda: self._browse_to_entry(entry_path)).grid(row=0, column=2, padx=5)
+
+        ttk.Label(dialog, text="Email получателя:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        entry_email = ttk.Entry(dialog, width=40)
+        entry_email.grid(row=1, column=1, pady=5)
+
+        ttk.Label(dialog, text="Тема письма:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        entry_subject = ttk.Entry(dialog, width=40)
+        entry_subject.grid(row=2, column=1, pady=5)
+
+        # Галочка "Несколько файлов одним письмом"
+        var_multi = tk.BooleanVar(value=False)
+        ttk.Checkbutton(dialog, text="Отправлять несколько файлов одним письмом", variable=var_multi).grid(
+            row=3, column=0, columnspan=2, sticky=tk.W, pady=5, padx=5)
+
+        def save():
+            multi = " | Многофайловый" if var_multi.get() else ""
+            self.auto_folders_list.insert(tk.END, f"[ОТПРАВКА] {entry_path.get()} -> {entry_email.get()} | Тема: {entry_subject.get()}{multi}")
+            dialog.destroy()
+
+        ttk.Button(dialog, text="Сохранить", command=save).grid(row=4, column=1, pady=10)
+
+    def _add_auto_receive(self):
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Добавить правило приема")
+        dialog.geometry("400x150")
+        dialog.transient(self.window)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text="Email отправителя:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        entry_email = ttk.Entry(dialog, width=40)
+        entry_email.grid(row=0, column=1, pady=5)
+
+        ttk.Label(dialog, text="Папка для сохранения:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        entry_folder = ttk.Entry(dialog, width=40)
+        entry_folder.grid(row=1, column=1, pady=5)
+        ttk.Button(dialog, text="Обзор...", command=lambda: self._browse_to_entry(entry_folder)).grid(row=1, column=2, padx=5)
+
+        def save():
+            self.auto_folders_list.insert(tk.END, f"[ПРИЕМ] {entry_email.get()} -> {entry_folder.get()}")
+            dialog.destroy()
+
+        ttk.Button(dialog, text="Сохранить", command=save).grid(row=2, column=1, pady=10)
+
+    def _browse_to_entry(self, entry):
+        folder = filedialog.askdirectory()
+        if folder:
+            entry.delete(0, tk.END)
+            entry.insert(0, folder)
+
+    def _remove_auto_folder(self):
+        selection = self.auto_folders_list.curselection()
+        if selection:
+            self.auto_folders_list.delete(selection[0])
+
+    def _edit_auto_folder(self, event=None):
+        """Редактирование выбранного элемента списка по двойному клику"""
+        selection = self.auto_folders_list.curselection()
+        if not selection:
+            return
+
+        idx = selection[0]
+        item = self.auto_folders_list.get(idx)
+
+        if item.startswith("[ОТПРАВКА]"):
+            # Редактирование правила отправки
+            # Формат: [ОТПРАВКА] path -> email | Тема: subject | Многофайловый
+            parts = item.replace("[ОТПРАВКА] ", "").split(" -> ")
+            old_path = normalize_path(parts[0])
+            rest = parts[1]
+
+            old_multi = False
+            if " | Многофайловый" in rest:
+                old_multi = True
+                rest = rest.replace(" | Многофайловый", "")
+
+            rest_parts = rest.split(" | Тема: ")
+            old_email = rest_parts[0]
+            old_subject = rest_parts[1] if len(rest_parts) > 1 else ""
+
+            dialog = tk.Toplevel(self.window)
+            dialog.title("Редактировать папку отправки")
+            dialog.geometry("450x260")
+            dialog.transient(self.window)
+            dialog.grab_set()
+
+            ttk.Label(dialog, text="Путь к папке:").grid(row=0, column=0, sticky=tk.W, pady=5)
+            entry_path = ttk.Entry(dialog, width=45)
+            entry_path.grid(row=0, column=1, pady=5)
+            entry_path.insert(0, old_path)
+            ttk.Button(dialog, text="Обзор...", command=lambda: self._browse_to_entry(entry_path)).grid(row=0, column=2, padx=5)
+
+            ttk.Label(dialog, text="Email получателя:").grid(row=1, column=0, sticky=tk.W, pady=5)
+            entry_email = ttk.Entry(dialog, width=45)
+            entry_email.grid(row=1, column=1, pady=5)
+            entry_email.insert(0, old_email)
+
+            ttk.Label(dialog, text="Тема письма:").grid(row=2, column=0, sticky=tk.W, pady=5)
+            entry_subject = ttk.Entry(dialog, width=45)
+            entry_subject.grid(row=2, column=1, pady=5)
+            entry_subject.insert(0, old_subject)
+
+            var_multi = tk.BooleanVar(value=old_multi)
+            ttk.Checkbutton(dialog, text="Отправлять несколько файлов одним письмом", variable=var_multi).grid(
+                row=3, column=0, columnspan=2, sticky=tk.W, pady=5, padx=5)
+
+            def save_edit():
+                new_path = normalize_path(entry_path.get())
+                new_email = entry_email.get().strip()
+                new_subject = entry_subject.get().strip()
+                if not new_path or not new_email:
+                    messagebox.showwarning("Внимание", "Путь и email обязательны")
+                    return
+                multi_str = " | Многофайловый" if var_multi.get() else ""
+                self.auto_folders_list.delete(idx)
+                self.auto_folders_list.insert(idx, f"[ОТПРАВКА] {new_path} -> {new_email} | Тема: {new_subject}{multi_str}")
+                dialog.destroy()
+
+            ttk.Button(dialog, text="Сохранить", command=save_edit).grid(row=4, column=1, pady=15)
+
+        elif item.startswith("[ПРИЕМ]"):
+            # Редактирование правила приема
+            parts = item.replace("[ПРИЕМ] ", "").split(" -> ")
+            old_email = parts[0]
+            old_folder = normalize_path(parts[1])
+
+            dialog = tk.Toplevel(self.window)
+            dialog.title("Редактировать правило приема")
+            dialog.geometry("450x150")
+            dialog.transient(self.window)
+            dialog.grab_set()
+
+            ttk.Label(dialog, text="Email отправителя:").grid(row=0, column=0, sticky=tk.W, pady=5)
+            entry_email = ttk.Entry(dialog, width=45)
+            entry_email.grid(row=0, column=1, pady=5)
+            entry_email.insert(0, old_email)
+
+            ttk.Label(dialog, text="Папка для сохранения:").grid(row=1, column=0, sticky=tk.W, pady=5)
+            entry_folder = ttk.Entry(dialog, width=45)
+            entry_folder.grid(row=1, column=1, pady=5)
+            entry_folder.insert(0, old_folder)
+            ttk.Button(dialog, text="Обзор...", command=lambda: self._browse_to_entry(entry_folder)).grid(row=1, column=2, padx=5)
+
+            def save_edit():
+                new_email = entry_email.get().strip()
+                new_folder = normalize_path(entry_folder.get())
+                if not new_email or not new_folder:
+                    messagebox.showwarning("Внимание", "Email и папка обязательны")
+                    return
+                self.auto_folders_list.delete(idx)
+                self.auto_folders_list.insert(idx, f"[ПРИЕМ] {new_email} -> {new_folder}")
+                dialog.destroy()
+
+            ttk.Button(dialog, text="Сохранить", command=save_edit).grid(row=2, column=1, pady=15)
+
+    def _auto_detect_settings(self):
+        """Автоматическое определение настроек сервера по email"""
+        email = self.entry_email.get().strip()
+        if not email or "@" not in email:
+            messagebox.showwarning("Автоопределение", "Введите корректный email-адрес")
+            return
+
+        config = get_auto_config(email)
+        if not config:
+            messagebox.showinfo("Автоопределение", 
+                f"Для домена {email.split('@')[1]} автоматические настройки не найдены.\n"
+                "Пожалуйста, укажите серверы вручную.")
+            return
+
+        # Применяем настройки
+        self.entry_imap_server.delete(0, tk.END)
+        self.entry_imap_server.insert(0, config["imap_server"])
+
+        self.entry_imap_port.delete(0, tk.END)
+        self.entry_imap_port.insert(0, str(config["imap_port"]))
+
+        self.combo_imap_enc.set(config["imap_encryption"])
+        self.combo_imap_auth.set(config["imap_auth"])
+
+        self.entry_smtp_server.delete(0, tk.END)
+        self.entry_smtp_server.insert(0, config["smtp_server"])
+
+        self.entry_smtp_port.delete(0, tk.END)
+        self.entry_smtp_port.insert(0, str(config["smtp_port"]))
+
+        self.combo_smtp_enc.set(config["smtp_encryption"])
+        self.combo_smtp_auth.set(config["smtp_auth"])
+
+        self.entry_sent_folder.delete(0, tk.END)
+        self.entry_sent_folder.insert(0, config.get("sent_folder", "Sent"))
+
+        # Имя пользователя по умолчанию = email
+        if not self.entry_imap_username.get().strip():
+            self.entry_imap_username.delete(0, tk.END)
+            self.entry_imap_username.insert(0, email)
+        if not self.entry_smtp_username.get().strip():
+            self.entry_smtp_username.delete(0, tk.END)
+            self.entry_smtp_username.insert(0, email)
+
+        messagebox.showinfo("Автоопределение", 
+            f"Настройки для {email} определены автоматически:\n\n"
+            f"Входящая: {config['imap_server']}:{config['imap_port']} ({config['imap_encryption']})\n"
+            f"Исходящая: {config['smtp_server']}:{config['smtp_port']} ({config['smtp_encryption']})\n\n"
+            f"Проверьте корректность и нажмите 'Перестестировать'.")
+
+    def _get_new_account(self):
+        """Открыть диалог создания новой учетной записи"""
+        messagebox.showinfo("Новая учетная запись", 
+                           "Для создания новой учетной записи обратитесь к администратору почтового сервера.")
+
+    def _advanced_settings(self):
+        """Открыть окно дополнительных настроек"""
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Дополнительная настройка")
+        dialog.geometry("500x350")
+        dialog.transient(self.window)
+        dialog.grab_set()
+
+        # Подпись
+        ttk.Label(dialog, text="Подпись для исходящих писем:").pack(anchor=tk.W, padx=10, pady=(10,0))
+        text_sig = tk.Text(dialog, width=50, height=4)
+        text_sig.pack(fill=tk.X, padx=10, pady=5)
+        text_sig.insert("1.0", self.config.get("signature", ""))
+
+        # Обработка писем
+        ttk.Label(dialog, text="Обработка писем на сервере:").pack(anchor=tk.W, padx=10, pady=(10,0))
+        combo_handling = ttk.Combobox(dialog, values=["оставить", "удалить", "переместить"], width=30, state="readonly")
+        combo_handling.pack(anchor=tk.W, padx=10, pady=5)
+        combo_handling.set(self.config.get("email_handling", "оставить"))
+
+        # Автозапуск
+        var_autostart = tk.BooleanVar(value=self.config.get("auto_start", False))
+        ttk.Checkbutton(dialog, text="Запускать программу автоматически при старте Windows", 
+                       variable=var_autostart).pack(anchor=tk.W, padx=10, pady=10)
+
+        def save_advanced():
+            self.config.set("signature", text_sig.get("1.0", tk.END).strip())
+            self.config.set("email_handling", combo_handling.get())
+            self.config.set("auto_start", var_autostart.get())
+            dialog.destroy()
+
+        ttk.Button(dialog, text="Сохранить", command=save_advanced).pack(pady=10)
+
+    def load_settings(self):
+        self.entry_display_name.insert(0, self.config.get("display_name", ""))
+        self.entry_email.insert(0, self.config.get("email", ""))
+        self.entry_password.insert(0, self.config.get("password", ""))
+        self.var_remember.set(self.config.get("remember_password", True))
+        self.entry_imap_server.insert(0, self.config.get("imap_server", ""))
+        self.entry_imap_port.delete(0, tk.END)
+        self.entry_imap_port.insert(0, str(self.config.get("imap_port", 143)))
+        self.combo_imap_enc.set(self.config.get("imap_encryption", "STARTTLS"))
+        self.combo_imap_auth.set(self.config.get("imap_auth", "Обычный пароль"))
+        self.entry_imap_username.insert(0, self.config.get("imap_username", ""))
+        self.entry_smtp_server.insert(0, self.config.get("smtp_server", ""))
+        self.entry_smtp_port.delete(0, tk.END)
+        self.entry_smtp_port.insert(0, str(self.config.get("smtp_port", 587)))
+        self.combo_smtp_enc.set(self.config.get("smtp_encryption", "STARTTLS"))
+        self.combo_smtp_auth.set(self.config.get("smtp_auth", "Обычный пароль"))
+        self.entry_smtp_username.insert(0, self.config.get("smtp_username", ""))
+        self.entry_send_interval.delete(0, tk.END)
+        self.entry_send_interval.insert(0, str(self.config.get("send_interval", 30)))
+        self.entry_receive_interval.delete(0, tk.END)
+        self.entry_receive_interval.insert(0, str(self.config.get("receive_interval", 30)))
+
+        self.entry_sent_folder.delete(0, tk.END)
+        self.entry_sent_folder.insert(0, self.config.get("sent_folder", "Sent"))
+        self.var_save_sent.set(self.config.get("save_sent_to_server", True))
+
+        self.entry_send_folder.insert(0, self.config.get("send_folder", ""))
+        self.var_send_multi.set(self.config.get("send_folder_multi_files", False))
+        self.var_send_enabled.set(self.config.get("send_enabled", True))
+        self.entry_receive_folder.insert(0, self.config.get("receive_folder", ""))
+        self.var_receive_enabled.set(self.config.get("receive_enabled", True))
+        self.entry_log_folder.insert(0, self.config.get("log_folder", ""))
+
+        for rule in self.config.get("auto_folders", []):
+            multi_str = " | Многофайловый" if rule.get("multi_files", False) else ""
+            self.auto_folders_list.insert(tk.END, f"[ОТПРАВКА] {rule.get('path', '')} -> {rule.get('email', '')} | Тема: {rule.get('subject', '')}{multi_str}")
+
+        for rule in self.config.get("auto_receive_rules", []):
+            self.auto_folders_list.insert(tk.END, f"[ПРИЕМ] {rule.get('from_email', '')} -> {rule.get('folder', '')}")
+
+        self.var_archive.set(self.config.get("archive_enabled", False))
+        self.entry_archive_sent.insert(0, self.config.get("archive_sent_folder", ""))
+        self.entry_archive_received.insert(0, self.config.get("archive_received_folder", ""))
+        self.combo_archive_format.set(self.config.get("archive_format", "zip"))
+
+        self.var_notify.set(self.config.get("notification_enabled", False))
+        self.combo_notify_type.set(self.config.get("notification_type", "email"))
+        self.entry_notify_email.insert(0, self.config.get("notification_email", ""))
+        self.entry_notify_max.insert(0, self.config.get("notification_max_channel", ""))
+
+        self._toggle_manual()
+
+    def _save_intervals(self):
+        """Сохранение интервалов проверки почты"""
+        try:
+            send_int = int(self.entry_send_interval.get() or 30)
+            recv_int = int(self.entry_receive_interval.get() or 30)
+            self.config.set("send_interval", max(5, send_int))
+            self.config.set("receive_interval", max(5, recv_int))
+        except ValueError:
+            pass
+
+    def _bind_all_clipboards(self):
+        """Привязка Ctrl+V/C/X ко всем полям ввода"""
+        entry_widgets = [
+            self.entry_display_name, self.entry_email,
+            self.entry_password, self.entry_imap_server,
+            self.entry_imap_port, self.entry_imap_username,
+            self.entry_smtp_server, self.entry_smtp_port,
+            self.entry_smtp_username,
+            self.entry_send_interval, self.entry_receive_interval,
+            self.entry_sent_folder,
+            self.entry_send_folder, self.entry_receive_folder,
+            self.entry_log_folder,
+            self.entry_archive_sent, self.entry_archive_received,
+            self.entry_notify_email, self.entry_notify_max,
+        ]
+        for w in entry_widgets:
+            if w:
+                bind_clipboard(w)
+
+        # Для Text (подпись)
+        if hasattr(self, 'text_signature') and self.text_signature:
+            bind_clipboard(self.text_signature)
+
+    def save_settings(self):
+        self.config.set("display_name", self.entry_display_name.get())
+        self.config.set("email", self.entry_email.get())
+        self.config.set("password", self.entry_password.get())
+        self.config.set("remember_password", self.var_remember.get())
+        self.config.set("connection_type", self.combo_incoming_type.get() + "/" + self.combo_outgoing_type.get())
+        self.config.set("manual_settings", True)
+        self.config.set("imap_server", self.entry_imap_server.get())
+        self.config.set("imap_port", int(self.entry_imap_port.get() or 143))
+        self.config.set("imap_encryption", self.combo_imap_enc.get())
+        self.config.set("imap_auth", self.combo_imap_auth.get())
+        self.config.set("imap_username", self.entry_imap_username.get())
+        self.config.set("smtp_server", self.entry_smtp_server.get())
+        self.config.set("smtp_port", int(self.entry_smtp_port.get() or 587))
+        self.config.set("smtp_encryption", self.combo_smtp_enc.get())
+        self.config.set("smtp_auth", self.combo_smtp_auth.get())
+        self.config.set("smtp_username", self.entry_smtp_username.get())
+
+        self.config.set("send_folder", normalize_path(self.entry_send_folder.get()))
+        self.config.set("send_folder_multi_files", self.var_send_multi.get())
+        self.config.set("send_enabled", self.var_send_enabled.get())
+        self.config.set("receive_folder", normalize_path(self.entry_receive_folder.get()))
+        self.config.set("receive_enabled", self.var_receive_enabled.get())
+        self.config.set("log_folder", normalize_path(self.entry_log_folder.get()))
+
+        auto_folders = []
+        auto_receive = []
+        for i in range(self.auto_folders_list.size()):
+            item = self.auto_folders_list.get(i)
+            if item.startswith("[ОТПРАВКА]"):
+                parts = item.replace("[ОТПРАВКА] ", "").split(" -> ")
+                path = normalize_path(parts[0])
+                rest = parts[1]
+                multi = False
+                if " | Многофайловый" in rest:
+                    multi = True
+                    rest = rest.replace(" | Многофайловый", "")
+                rest_parts = rest.split(" | Тема: ")
+                email = rest_parts[0]
+                subject = rest_parts[1] if len(rest_parts) > 1 else ""
+                auto_folders.append({"path": path, "email": email, "subject": subject, "type": "send", "multi_files": multi})
+            elif item.startswith("[ПРИЕМ]"):
+                parts = item.replace("[ПРИЕМ] ", "").split(" -> ")
+                auto_receive.append({"from_email": parts[0], "folder": normalize_path(parts[1])})
+
+        self.config.set("auto_folders", auto_folders)
+        self.config.set("auto_receive_rules", auto_receive)
+        self._save_intervals()
+
+        self.config.set("archive_enabled", self.var_archive.get())
+        self.config.set("archive_sent_folder", normalize_path(self.entry_archive_sent.get()))
+        self.config.set("archive_received_folder", normalize_path(self.entry_archive_received.get()))
+        self.config.set("archive_format", self.combo_archive_format.get())
+
+        self.config.set("notification_enabled", self.var_notify.get())
+        self.config.set("notification_type", self.combo_notify_type.get())
+        self.config.set("notification_email", self.entry_notify_email.get())
+        self.config.set("notification_max_channel", self.entry_notify_max.get())
+
+        messagebox.showinfo("Сохранение", "Настройки сохранены")
+        self.window.destroy()
+
+
+class MainWindow:
+    """Главное окно приложения"""
+
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title(f"Автопроцессинг электронной почты v{VERSION}")
+        self.config = ConfigManager()
+        self.stats_manager = StatsManager()
+        self.root.geometry(self.config.get("window_geometry", "1100x750+100+100"))
+
+        self.processor = None
+        self.processor_thread = None
+        self.running = False
+        self.tray_icon = None
+        self.tray_thread = None
+        self._exiting = False
+        self._new_messages_count = 0
+        self._last_notified_sender = ""
+        self._last_notified_subject = ""
+
+        self.chart_data = {"time": [], "sent": [], "received": []}
+
+        # История — хранится в JSON, загружается при старте
+        self.history_manager = HistoryManager()
+
+        self.create_widgets()
+        self.setup_logging()
+        self.log_message(f"Технический лог: {os.path.join(self.log_folder, LOG_FILE)}")
+        self.setup_tray()
+
+        # Переопределяем закрытие окна — сворачиваем в трей
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        self._update_ui()
+
+    def setup_logging(self):
+        # Определяем папку для логов (абсолютный путь)
+        log_folder = self.config.get("log_folder", "").strip()
+        if not log_folder:
+            # По умолчанию — папка, где находится скрипт
+            log_folder = os.path.dirname(os.path.abspath(__file__))
+            if not log_folder:
+                log_folder = os.getcwd()
+        log_folder = os.path.abspath(log_folder)
+        os.makedirs(log_folder, exist_ok=True)
+        self.log_folder = log_folder
+
+        log_path = os.path.join(log_folder, LOG_FILE)
+
+        # Получаем root logger и настраиваем явно (basicConfig игнорируется, если уже есть handlers)
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)
+
+        # Удаляем старые handlers, чтобы избежать дублирования записей
+        for handler in root_logger.handlers[:]:
+            try:
+                handler.close()
+            except:
+                pass
+            root_logger.removeHandler(handler)
+
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+        # Файловый handler
+        fh = logging.FileHandler(log_path, encoding='utf-8', mode='a')
+        fh.setLevel(logging.INFO)
+        fh.setFormatter(formatter)
+        root_logger.addHandler(fh)
+
+        # Консольный handler
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(formatter)
+        root_logger.addHandler(ch)
+
+        logging.info(f"=== Логирование запущено ===")
+        logging.info(f"Папка логов: {log_folder}")
+        logging.info(f"Файл логов: {log_path}")
+
+    def setup_tray(self):
+        """Настройка иконки в системном трее"""
+        if not PYSTRAY_AVAILABLE:
+            return
+
+        menu = pystray.Menu(
+            pystray.MenuItem("Показать окно", self._tray_show),
+            pystray.MenuItem("Выход", self._tray_exit)
+        )
+
+        self.tray_icon = pystray.Icon(
+            "mail_processor",
+            create_tray_icon(),
+            "Автопроцессинг почты",
+            menu
+        )
+
+        # Запускаем иконку трея в отдельном потоке
+        self.tray_thread = threading.Thread(target=self.tray_icon.run, daemon=True)
+        self.tray_thread.start()
+
+        # Даем время на инициализацию
+        time.sleep(0.5)
+
+    def create_widgets(self):
+        # Верхняя панель с кнопками
+        btn_frame = ttk.Frame(self.root)
+        btn_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        self.btn_start = ttk.Button(btn_frame, text="▶ Запуск", command=self.start_processing)
+        self.btn_start.pack(side=tk.LEFT, padx=5)
+
+        self.btn_stop = ttk.Button(btn_frame, text="⏹ Остановка", command=self.stop_processing, state=tk.DISABLED)
+        self.btn_stop.pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(btn_frame, text="⚙ Настройки", command=self.open_settings).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="⬆ Обновить", command=self._update_app).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="ℹ О программе", command=self._show_about).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="💾 Резервная копия", command=self._backup_settings).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📂 Восстановление", command=self._restore_settings).pack(side=tk.LEFT, padx=5)
+
+        # Кнопка Выход (полное закрытие программы)
+        ttk.Button(btn_frame, text="✕ Выход", command=self.exit_app).pack(side=tk.LEFT, padx=5)
+
+        # Статус
+        self.lbl_status = ttk.Label(btn_frame, text="Статус: Остановлено", foreground="red")
+        self.lbl_status.pack(side=tk.RIGHT, padx=10)
+
+        # === NOTEBOOK с вкладками ===
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        # --- Вкладка "Главная" ---
+        self.tab_main = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_main, text="Главная")
+        self._create_main_tab()
+
+        # --- Вкладка "Приём" ---
+        self.tab_received = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_received, text="📨 Приём")
+        self.table_received = DataTable(
+            self.tab_received,
+            ["datetime", "sender", "subject", "attachments"],
+            ["Дата и время", "Отправитель", "Тема", "Вложения"]
+        )
+        # Загружаем сохраненные данные
+        recv_data = [(e.get("datetime",""), e.get("sender",""), e.get("subject",""), e.get("attachments","нет"))
+                     for e in self.history_manager.get_received()]
+        self.table_received.set_data(recv_data)
+
+        # --- Вкладка "Отправка" ---
+        self.tab_sent = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_sent, text="📤 Отправка")
+        self.table_sent = DataTable(
+            self.tab_sent,
+            ["datetime", "recipient", "subject", "attachments"],
+            ["Дата и время", "Получатель", "Тема", "Вложения"]
+        )
+        # Загружаем сохраненные данные
+        sent_data = [(e.get("datetime",""), e.get("recipient",""), e.get("subject",""), e.get("attachments","нет"))
+                     for e in self.history_manager.get_sent()]
+        self.table_sent.set_data(sent_data)
+
+        # Подсказка о трее + версия
+        hint_frame = ttk.Frame(self.root)
+        hint_frame.pack(fill=tk.X, padx=10, pady=2)
+        ttk.Label(hint_frame, text="💡 При закрытии окна программа сворачивается в трей. Полный выход — кнопка ✕ Выход", 
+                 foreground="gray", font=("Arial", 9)).pack(side=tk.LEFT)
+        ttk.Label(hint_frame, text=f"v{VERSION}", foreground="gray", font=("Arial", 9)).pack(side=tk.RIGHT)
+
+    def _create_main_tab(self):
+        """Создание содержимого вкладки 'Главная'"""
+        # Верхняя часть: статистика + график
+        main_frame = ttk.Frame(self.tab_main)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # === ЛЕВАЯ ПАНЕЛЬ — СТАТИСТИКА ===
+        left_frame = ttk.LabelFrame(main_frame, text="Статистика", padding=10)
+        left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+
+        # Текущая сессия
+        ttk.Label(left_frame, text="Текущая сессия:", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0,5))
+
+        self.lbl_sent = ttk.Label(left_frame, text="Отправлено: 0", font=("Arial", 11))
+        self.lbl_sent.pack(anchor=tk.W, pady=2)
+
+        self.lbl_received = ttk.Label(left_frame, text="Получено: 0", font=("Arial", 11))
+        self.lbl_received.pack(anchor=tk.W, pady=2)
+
+        self.lbl_errors = ttk.Label(left_frame, text="Ошибок: 0", font=("Arial", 11), foreground="red")
+        self.lbl_errors.pack(anchor=tk.W, pady=2)
+
+        self.lbl_sent_mb = ttk.Label(left_frame, text="Отправлено (МБ): 0.00", font=("Arial", 9))
+        self.lbl_sent_mb.pack(anchor=tk.W, pady=1)
+
+        self.lbl_received_mb = ttk.Label(left_frame, text="Получено (МБ): 0.00", font=("Arial", 9))
+        self.lbl_received_mb.pack(anchor=tk.W, pady=1)
+
+        ttk.Separator(left_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
+
+        # За все время
+        ttk.Label(left_frame, text="За все время:", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0,5))
+
+        total = self.stats_manager.get()
+        self.lbl_total_sent = ttk.Label(left_frame, text=f"Отправлено: {total['sent']}", font=("Arial", 11))
+        self.lbl_total_sent.pack(anchor=tk.W, pady=2)
+
+        self.lbl_total_received = ttk.Label(left_frame, text=f"Получено: {total['received']}", font=("Arial", 11))
+        self.lbl_total_received.pack(anchor=tk.W, pady=2)
+
+        self.lbl_total_errors = ttk.Label(left_frame, text=f"Ошибок: {total['errors']}", font=("Arial", 11), foreground="red")
+        self.lbl_total_errors.pack(anchor=tk.W, pady=2)
+
+        self.lbl_total_sent_mb = ttk.Label(left_frame, text=f"Отправлено (МБ): {total['sent_mb']:.2f}", font=("Arial", 9))
+        self.lbl_total_sent_mb.pack(anchor=tk.W, pady=1)
+
+        self.lbl_total_received_mb = ttk.Label(left_frame, text=f"Получено (МБ): {total['received_mb']:.2f}", font=("Arial", 9))
+        self.lbl_total_received_mb.pack(anchor=tk.W, pady=1)
+
+        # === ПРАВАЯ ПАНЕЛЬ — ГРАФИК ===
+        right_frame = ttk.LabelFrame(main_frame, text="График трафика (МБ)", padding=5)
+        right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+
+        if MATPLOTLIB_AVAILABLE:
+            self.fig = Figure(figsize=(3.5, 2.2), dpi=90)
+            self.ax = self.fig.add_subplot(111)
+            self.ax.set_xlabel("Время")
+            self.ax.set_ylabel("МБ")
+            self.ax.legend(["Отправка", "Прием"], loc="upper left")
+            self.canvas = FigureCanvasTkAgg(self.fig, master=right_frame)
+            self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        else:
+            ttk.Label(right_frame, text="Для отображения графика установите matplotlib:\npip install matplotlib").pack(pady=30)
+            self.canvas = None
+
+        # Нижняя панель — лог
+        log_frame = ttk.LabelFrame(self.tab_main, text="Журнал событий", padding=5)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        self.txt_log = scrolledtext.ScrolledText(log_frame, height=8, state=tk.DISABLED)
+        self.txt_log.pack(fill=tk.BOTH, expand=True)
+
+    def log_message(self, msg):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.txt_log.configure(state=tk.NORMAL)
+        self.txt_log.insert(tk.END, f"[{timestamp}] {msg}\n")
+        self.txt_log.see(tk.END)
+        self.txt_log.configure(state=tk.DISABLED)
+
+    def status_callback(self, msg):
+        self.root.after(0, lambda: self.log_message(msg))
+
+    def history_callback(self, event_type, entry):
+        """Callback для добавления записи в историю"""
+        def update():
+            if event_type == "sent":
+                values = (entry.get("datetime", ""), entry.get("recipient", ""), entry.get("subject", ""), entry.get("attachments", "нет"))
+                self.history_manager.add_sent(entry)
+                self.table_sent.add_item(values)
+            elif event_type == "received":
+                values = (entry.get("datetime", ""), entry.get("sender", ""), entry.get("subject", ""), entry.get("attachments", "нет"))
+                self.history_manager.add_received(entry)
+                self.table_received.add_item(values)
+        self.root.after(0, update)
+
+    def start_processing(self):
+        if not self.config.get("email") or not self.config.get("password"):
+            messagebox.showwarning("Внимание", "Сначала настройте подключение в настройках")
+            return
+
+        log_folder = self.config.get("log_folder", "").strip()
+        if not log_folder:
+            log_folder = os.path.dirname(os.path.abspath(__file__))
+            if not log_folder:
+                log_folder = os.getcwd()
+        log_folder = os.path.abspath(log_folder)
+        os.makedirs(log_folder, exist_ok=True)
+
+        mail_logger = MailLogger(log_folder)
+
+        self.log_message(f"Логи операций: {log_folder}")
+        self.log_message(f"  Отправка: {os.path.join(log_folder, 'sent_log.txt')}")
+        self.log_message(f"  Прием: {os.path.join(log_folder, 'received_log.txt')}")
+
+        self.processor = MailProcessor(
+            self.config, mail_logger,
+            self.status_callback, self._notify_new_email,
+            self.stats_manager, self.history_callback
+        )
+        self.running = True
+
+        self.processor_thread = threading.Thread(target=self.processor.start, daemon=True)
+        self.processor_thread.start()
+
+        self.btn_start.configure(state=tk.DISABLED)
+        self.btn_stop.configure(state=tk.NORMAL)
+        self.lbl_status.configure(text="Статус: Работает", foreground="green")
+        self.log_message("Программа запущена")
+
+    def stop_processing(self):
+        self.running = False
+        if self.processor:
+            self.processor.stop()
+
+        self.btn_start.configure(state=tk.NORMAL)
+        self.btn_stop.configure(state=tk.DISABLED)
+        self.lbl_status.configure(text="Статус: Остановлено", foreground="red")
+        self.log_message("Программа остановлена")
+
+    def open_settings(self):
+        SettingsWindow(self.root, self.config)
+
+    def _on_close(self):
+        """При закрытии окна — сворачиваем в трей, а не выходим"""
+        if self._exiting:
+            return
+
+        # Скрываем окно из панели задач
+        self.root.withdraw()
+        self.log_message("Окно свернуто в трей")
+        self._update_tray_tooltip()
+
+        # Показываем уведомление в трее (если pystray доступен)
+        if self.tray_icon and PYSTRAY_AVAILABLE:
+            try:
+                self.tray_icon.notify("Программа продолжает работу в фоновом режиме", "Автопроцессинг почты")
+            except:
+                pass
+
+    def _tray_show(self, icon=None, item=None):
+        """Восстановление окна из трея"""
+        self.root.after(0, self._show_window)
+
+    def _show_window(self):
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+        # Сбрасываем счётчик новых сообщений при показе окна
+        self._new_messages_count = 0
+        self._update_tray_tooltip()
+
+    def _notify_new_email(self, sender, subject):
+        """Уведомление в трее о новом письме"""
+        self._new_messages_count += 1
+        self._last_notified_sender = sender
+        self._last_notified_subject = subject
+
+        # Обновляем tooltip иконки трея
+        self._update_tray_tooltip()
+
+        # Показываем уведомление (только если pystray доступен)
+        if self.tray_icon and PYSTRAY_AVAILABLE:
+            try:
+                title = "Новое письмо" if self._new_messages_count == 1 else f"Новых писем: {self._new_messages_count}"
+                msg = f"От: {sender}\nТема: {subject}"
+                self.tray_icon.notify(msg, title)
+            except Exception as e:
+                logging.warning(f"Не удалось показать уведомление трея: {e}")
+
+    def _update_tray_tooltip(self):
+        """Обновление подсказки иконки трея"""
+        if self.tray_icon and PYSTRAY_AVAILABLE:
+            try:
+                if self._new_messages_count > 0:
+                    self.tray_icon.title = f"Автопроцессинг почты ({self._new_messages_count} новых)"
+                else:
+                    self.tray_icon.title = "Автопроцессинг почты"
+            except:
+                pass
+
+    def _tray_exit(self, icon=None, item=None):
+        """Выход из трея"""
+        self.root.after(0, self.exit_app)
+
+    def _show_about(self):
+        """Окно 'О программе'"""
+        about_text = (
+            f"Автопроцессинг электронной почты v{VERSION}\n\n"
+            "Данная программа разработана для использования УЗСНами Краснодарского края.\n\n"
+            "Автор: Трощенко Иван\n\n"
+            "В случае возникновения вопросов — обращаться в канал по тестированию данной программы.\n\n"
+            "Группа MAX:\n"
+            "https://max.ru/join/--5-pGF8J3toTewT3tRikNa8yF-P0O6XLSbEvSgLTHk\n\n"
+            "Прошу относиться с пониманием, что есть погрешности и ошибки.\n"
+            "Возможны внесения изменений по мере возможностей."
+        )
+        messagebox.showinfo("О программе", about_text)
+
+    def _backup_settings(self):
+        """Резервное копирование настроек и логов в ZIP-архив"""
+        try:
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            if not app_dir:
+                app_dir = os.getcwd()
+
+            # Файлы для резервного копирования
+            backup_files = [
+                CONFIG_FILE,
+                STATS_FILE,
+                SENT_HISTORY_FILE,
+                RECEIVED_HISTORY_FILE,
+                LOG_FILE,
+                "sent_log.txt",
+                "received_log.txt",
+            ]
+
+            # Диалог сохранения
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_name = f"MailProcessor_Backup_{timestamp}.zip"
+            file_path = filedialog.asksaveasfilename(
+                title="Сохранить резервную копию",
+                defaultextension=".zip",
+                initialfile=default_name,
+                filetypes=[("ZIP-архив", "*.zip")]
+            )
+            if not file_path:
+                return
+
+            # Создаем ZIP
+            with zipfile.ZipFile(file_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for fname in backup_files:
+                    fpath = os.path.join(app_dir, fname)
+                    if os.path.exists(fpath):
+                        zf.write(fpath, fname)
+
+            self.log_message(f"Резервная копия создана: {file_path}")
+            messagebox.showinfo("Резервное копирование",
+                f"Резервная копия успешно создана:\n{file_path}\n\n"
+                f"В архив включены настройки, статистика, история и логи.")
+
+        except Exception as e:
+            logging.error(f"Ошибка резервного копирования: {e}")
+            messagebox.showerror("Ошибка", f"Не удалось создать резервную копию:\n{e}")
+
+    def _restore_settings(self):
+        """Восстановление настроек и логов из ZIP-архива"""
+        file_path = filedialog.askopenfilename(
+            title="Выберите файл резервной копии",
+            filetypes=[("ZIP-архив", "*.zip"), ("Все файлы", "*.*")]
+        )
+        if not file_path:
+            return
+
+        try:
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            if not app_dir:
+                app_dir = os.getcwd()
+
+            # Проверяем содержимое архива
+            with zipfile.ZipFile(file_path, 'r') as zf:
+                names = zf.namelist()
+                if CONFIG_FILE not in names:
+                    messagebox.showwarning("Восстановление",
+                        f"В выбранном архиве не найден {CONFIG_FILE}.\n"
+                        "Это может быть не резервная копия программы.")
+                    return
+
+                # Показываем список файлов
+                files_list = "\n".join(f"  • {n}" for n in names)
+
+                result = messagebox.askyesno("Восстановление",
+                    f"В архиве найдены следующие файлы:\n{files_list}\n\n"
+                    "Текущие файлы будут заменены.\n"
+                    "Продолжить восстановление?")
+
+                if not result:
+                    return
+
+                # Распаковка
+                zf.extractall(app_dir)
+
+            self.log_message(f"Восстановление завершено из: {file_path}")
+            messagebox.showinfo("Восстановление",
+                "Настройки и данные успешно восстановлены.\n\n"
+                "Перезапустите программу для применения изменений.")
+
+        except Exception as e:
+            logging.error(f"Ошибка восстановления: {e}")
+            messagebox.showerror("Ошибка", f"Не удалось выполнить восстановление:\n{e}")
+
+    def _update_app(self):
+        """Обновление программы из выбранного файла"""
+        file_path = filedialog.askopenfilename(
+            title="Выберите файл обновления",
+            filetypes=[("ZIP-архив", "*.zip"), ("Все файлы", "*.*")]
+        )
+        if not file_path:
+            return
+
+        try:
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            if not app_dir:
+                app_dir = os.getcwd()
+
+            self.log_message(f"Обновление: выбран файл {file_path}")
+
+            # Распаковываем ZIP в папку программы
+            with zipfile.ZipFile(file_path, 'r') as zf:
+                # Проверяем, что в архиве есть нужные файлы
+                names = zf.namelist()
+                if "mail_auto_processor.py" not in names:
+                    messagebox.showwarning("Обновление", "В выбранном архиве не найден mail_auto_processor.py\nОбновление отменено.")
+                    return
+
+                # Резервная копия текущего файла
+                current_py = os.path.join(app_dir, "mail_auto_processor.py")
+                backup_py = os.path.join(app_dir, "mail_auto_processor.py.bak")
+                if os.path.exists(current_py):
+                    shutil.copy2(current_py, backup_py)
+
+                # Распаковка
+                zf.extractall(app_dir)
+
+            self.log_message(f"Обновление завершено. Файлы распакованы в {app_dir}")
+            self.log_message(f"Резервная копия: {backup_py}")
+
+            result = messagebox.askyesno("Обновление завершено",
+                f"Файлы обновления распакованы в:\n{app_dir}\n\n"
+                f"Резервная копия создана:\n{backup_py}\n\n"
+                "Перезапустить программу сейчас?")
+
+            if result:
+                self.log_message("Перезапуск программы...")
+                # Перезапуск: запускаем новый процесс и закрываем текущий
+                if sys.platform == "win32":
+                    # Windows: запускаем через pythonw чтобы не было консоли
+                    subprocess.Popen([sys.executable, current_py], cwd=app_dir, shell=False)
+                else:
+                    # Linux/Mac
+                    subprocess.Popen([sys.executable, current_py], cwd=app_dir)
+                self.exit_app()
+
+        except Exception as e:
+            logging.error(f"Ошибка обновления: {e}")
+            messagebox.showerror("Ошибка обновления", f"Не удалось выполнить обновление:\n{e}")
+
+    def exit_app(self):
+        """Полный выход из программы"""
+        if self._exiting:
+            return
+        self._exiting = True
+
+        if self.running:
+            self.stop_processing()
+
+        # Останавливаем иконку трея
+        if self.tray_icon and PYSTRAY_AVAILABLE:
+            try:
+                self.tray_icon.stop()
+            except:
+                pass
+
+        self.config.set("window_geometry", self.root.geometry())
+        self.root.destroy()
+        sys.exit(0)
+
+    def _update_ui(self):
+        if self.processor and self.running:
+            stats = self.processor.get_stats()
+
+            self.lbl_sent.configure(text=f"Отправлено: {stats['sent']}")
+            self.lbl_received.configure(text=f"Получено: {stats['received']}")
+            self.lbl_errors.configure(text=f"Ошибок: {stats['errors']}")
+            self.lbl_sent_mb.configure(text=f"Отправлено (МБ): {stats['sent_mb']:.2f}")
+            self.lbl_received_mb.configure(text=f"Получено (МБ): {stats['received_mb']:.2f}")
+
+            # Обновляем статистику за все время
+            total = self.stats_manager.get()
+            self.lbl_total_sent.configure(text=f"Отправлено: {total['sent']}")
+            self.lbl_total_received.configure(text=f"Получено: {total['received']}")
+            self.lbl_total_errors.configure(text=f"Ошибок: {total['errors']}")
+            self.lbl_total_sent_mb.configure(text=f"Отправлено (МБ): {total['sent_mb']:.2f}")
+            self.lbl_total_received_mb.configure(text=f"Получено (МБ): {total['received_mb']:.2f}")
+
+            if MATPLOTLIB_AVAILABLE and self.canvas:
+                now = datetime.now().strftime("%H:%M:%S")
+                self.chart_data["time"].append(now)
+                self.chart_data["sent"].append(stats["sent_mb"])
+                self.chart_data["received"].append(stats["received_mb"])
+
+                if len(self.chart_data["time"]) > 20:
+                    self.chart_data["time"] = self.chart_data["time"][-20:]
+                    self.chart_data["sent"] = self.chart_data["sent"][-20:]
+                    self.chart_data["received"] = self.chart_data["received"][-20:]
+
+                x_vals = list(range(len(self.chart_data["time"])))
+
+                self.ax.clear()
+                self.ax.plot(x_vals, self.chart_data["sent"], 'g-', label="Отправка", marker='o', linewidth=1.5)
+                self.ax.plot(x_vals, self.chart_data["received"], 'b-', label="Прием", marker='s', linewidth=1.5)
+                self.ax.set_xlabel("Время")
+                self.ax.set_ylabel("МБ")
+                self.ax.legend(loc="upper left")
+
+                # Подписи оси X — время, но не все (каждая 3-я или 5-я)
+                n = len(self.chart_data["time"])
+                step = max(1, n // 5)
+                self.ax.set_xticks(x_vals[::step])
+                self.ax.set_xticklabels(self.chart_data["time"][::step], rotation=30, ha='right', fontsize=8)
+
+                self.ax.grid(True, alpha=0.3)
+                self.fig.tight_layout()
+                self.canvas.draw()
+
+        self.root.after(1000, self._update_ui)
+
+    def run(self):
+        self.root.mainloop()
+
+
+def main():
+    app = MainWindow()
+    app.run()
+
+
+if __name__ == "__main__":
+    main()

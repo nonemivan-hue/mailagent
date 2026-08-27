@@ -1,0 +1,14 @@
+# Зависимости для Автопроцессинга электронной почты
+# Установка: pip install -r requirements.txt
+
+# Обязательные (входят в стандартную библиотеку Python):
+# - tkinter (предустановлен в Python для Windows)
+# - imaplib, smtplib, email (стандартная библиотека)
+# - json, os, shutil, zipfile, threading, time, socket (стандартная библиотека)
+
+# Для системного трея (обязательно):
+pystray>=0.19.0
+Pillow>=9.0.0
+
+# Опциональные (для графика трафика):
+matplotlib>=3.5.0

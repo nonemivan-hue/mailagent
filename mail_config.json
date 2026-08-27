@@ -1,0 +1,428 @@
+{
+  "display_name": "Трощенко И.А.",
+  "email": "uszn_gelen_obmen@mail.ru",
+  "password": "NKeNc4KKJBiUN6SjBX4A",
+  "remember_password": true,
+  "connection_type": "IMAP/SMTP",
+  "imap_username": "uszn_gelen_obmen@mail.ru",
+  "smtp_username": "uszn_gelen_obmen@mail.ru",
+  "imap_server": "imap.mail.ru",
+  "imap_port": 993,
+  "imap_encryption": "SSL",
+  "imap_auth": "Обычный пароль",
+  "smtp_server": "smtp.mail.ru",
+  "smtp_port": 465,
+  "smtp_encryption": "SSL",
+  "smtp_auth": "Обычный пароль",
+  "manual_settings": true,
+  "signature": "",
+  "email_handling": "оставить",
+  "send_folder": "D:\\Mail\\Sent",
+  "receive_folder": "D:\\Mail\\In",
+  "log_folder": "D:\\Mail\\logs",
+  "archive_enabled": true,
+  "archive_sent_folder": "D:\\Mail\\arhiv\\sent",
+  "archive_received_folder": "D:\\Mail\\arhiv\\in",
+  "archive_format": "7z",
+  "notification_enabled": true,
+  "notification_type": "email",
+  "notification_email": "nonem@list.ru",
+  "notification_max_channel": "",
+  "auto_start": false,
+  "send_interval": 120,
+  "receive_interval": 120,
+  "send_enabled": true,
+  "receive_enabled": true,
+  "sent_folder": "Sent",
+  "save_sent_to_server": true,
+  "auto_folders": [
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\Взлет ООО Геленджик",
+      "email": "vzlet2025@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\Геленджик УК ООО",
+      "email": "uk_gelendzhik@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\Грибоедова, 60а",
+      "email": "stroganovaelmira@yandex.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ЖКС - 18 (Геленджик)",
+      "email": "zhks4vdv02@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\Курорт Сервис УК (Геленджик)",
+      "email": "1004010@internet.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\Кустадеева 21 Геленджик",
+      "email": "dom.kustodiyeva21@mail.ru",
+      "subject": "Запрос данных",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\МУП _Тепловые сети_ Геленджик",
+      "email": "teplosetigel@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО _ЕРЦ_ Геленджик",
+      "email": "savin.andrey@inbox.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО _КОМФОРТСТРОЙ ЮГ_",
+      "email": "komfortstroy2010@yandex.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО _Комфортстрой_",
+      "email": "komfortstroy2010@yandex.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО _Монолит-Строй_",
+      "email": "monolitstroy5@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО _РЕПИНО_",
+      "email": "dubinasherk@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО _Союз УК Геленджик_",
+      "email": "info@soyuzukgel.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО _Твой Дом_ Геленджик",
+      "email": "3678mar@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО _УК ЛАДА_ Геленджик",
+      "email": "ladagel@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО _УО МегаСити_ ранее ООО _УО МЕГАПОЛИС_",
+      "email": "megapolis.uo@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО УК _Акватория_",
+      "email": "holding20@yandex.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО УК _Высота_",
+      "email": "visota-ooo@ya.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО УК _Геленджикская_",
+      "email": "gelendzhikskaya_uk@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО УК _ДОМОВОЙ_",
+      "email": "uk-domovoy@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО УК _КАСКАД_ ГЕЛЕНДЖИК__",
+      "email": "uk-zhilkom@yandex.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО УК _Каскад-Кубань_",
+      "email": "uk.kaskad-kuban@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО УК _ЛИДЕР-ЮГ_ Геленджик",
+      "email": "uk.lider-yug@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО УК _Нептун_",
+      "email": "uk_neptun@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО УК _Престиж-ЮГ_ Геленджик",
+      "email": "uk2304081943@yandex.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО УК _СТРОЙДОМ_ Геленджик",
+      "email": "stroidom_gel@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО УК _Чайка_ Геленджик",
+      "email": "ladagel@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО_Газпром межрегионгаз Краснодар_",
+      "email": "gmk_gelen@krk-rg.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ООО_КВГ_",
+      "email": "a.volkov@kv-gelendzhik.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ПАО _ТНС энерго Кубань_",
+      "email": "aak_nross@kuban.tns-e.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\Пионер УК ГЕЛЕНДЖИК",
+      "email": "Uk-pioner@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\Приморье ТСЖ Геленеджик Приморская",
+      "email": "tsj-primore30@rambler.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\РКЦ Южный горизонт",
+      "email": "info@uk-yug.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\СМКД - Раевскго 6 (Геленджик)",
+      "email": "99999a@internet.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\Торик ТСН",
+      "email": "tsntorik44@yandex.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ТСЖ _ГЕЛИОС_",
+      "email": "tszh_gelios@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ТСЖ _Династия_",
+      "email": "domdinastia@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ТСЖ _ДУБОВАЯ РОЩА_",
+      "email": "79181594940@yandex.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ТСЖ _Молодежный_",
+      "email": "stroganovaelmira@yandex.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ТСЖ _Наш Дом №2_ Савицкого,2",
+      "email": "tsg_nashdom2@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ТСЖ _НЕЗАБУДКА_",
+      "email": "nezabudka.tsg@gmail.com",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ТСЖ _Содружество_ Геленджик",
+      "email": "sod.ooo@yandex.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ТСЖ _Сосновый бор_",
+      "email": "viktori.k@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ТСЖ Вымпел-2_",
+      "email": "tsn-vimpel2@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ТСН _Гармония_ Геленджик",
+      "email": "krivonosova68@bk.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ТСН _Эврика_",
+      "email": "tsnevrika@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\ТСН Южный квартал Сурикова 60А,Б,В",
+      "email": "n_adaeva@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\УК _Дивноморское_",
+      "email": "divna.jilservice@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\УК _Мелис_",
+      "email": "melisplyus@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\УК _Подкова_",
+      "email": "oooupravdom-uk@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\УК Геленджикский маяк ООО (Геленджик)",
+      "email": "info@ukgm23.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\УК Престиж-Сервис ООО (Геленджик)",
+      "email": "uk2304081943@yandex.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\Филиал АО_НЭСК_Геленджикэнергосбыт_",
+      "email": "privat-tech@nesk.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\Фонд капитального ремонта МКД",
+      "email": "23fond-03@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    },
+    {
+      "path": "\\\\192.168.110.52\\USZN2\\Трощенко\\ЖКУ\\Отправка почты\\Южная звезда ТСН Геленджик",
+      "email": "yuzhnaya.zvezda@mail.ru",
+      "subject": "Запрос данных\n",
+      "type": "send",
+      "multi_files": true
+    }
+  ],
+  "auto_receive_rules": [],
+  "window_geometry": "1100x750+100+100",
+  "send_folder_multi_files": true
+}
