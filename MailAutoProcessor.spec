@@ -1,11 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+block_cipher = None
+
 a = Analysis(
-    ['C:\\mail3\\mail_auto_processor.py'],
+    ['mail_auto_processor.py'],
     pathex=[],
     binaries=[],
-    datas=[('C:\\mail3\\config_example.json', '.'), ('C:\\mail3\\README.md', '.'), ('C:\\mail3\\requirements.txt', '.'), ('C:\\mail3\\icon.png', '.')],
+    datas=[('config_example.json', '.'), ('README.md', '.'), ('requirements.txt', '.'), ('icon.png', '.')],
     hiddenimports=['PIL._tkinter_finder', 'pystray._win32'],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +37,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['C:\\mail3\\icon.ico'],
+    icon=['icon.ico'],
 )

@@ -49,12 +49,44 @@ except ImportError:
     PYSTRAY_AVAILABLE = False
 
 # Константы
-CONFIG_FILE = "mail_config.json"
-LOG_FILE = "mail_app.log"
-STATS_FILE = "mail_stats.json"
-SENT_HISTORY_FILE = "sent_history.json"
-RECEIVED_HISTORY_FILE = "received_history.json"
-VERSION = "1.4.6"
+VERSION = "1.4.7"
+
+
+def get_data_dir():
+    """Получение директории для хранения данных (статистика, история, конфиг)"""
+    # При установке в Windows используем папку с приложением
+    if getattr(sys, 'frozen', False):
+        # Приложение запущено как скомпилированный exe
+        app_dir = os.path.dirname(sys.executable)
+    else:
+        # Приложение запущено как скрипт
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Проверяем, есть ли права на запись в эту директорию
+    test_file = os.path.join(app_dir, ".write_test")
+    try:
+        with open(test_file, 'w') as f:
+            f.write("test")
+        os.remove(test_file)
+        return app_dir
+    except (PermissionError, OSError):
+        # Если нет прав, используем AppData (Windows) или домашнюю директорию
+        if sys.platform == 'win32':
+            appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+            data_dir = os.path.join(appdata, 'MailAutoProcessor')
+        else:
+            data_dir = os.path.expanduser('~/.mail_auto_processor')
+        
+        os.makedirs(data_dir, exist_ok=True)
+        return data_dir
+
+
+DATA_DIR = get_data_dir()
+CONFIG_FILE = os.path.join(DATA_DIR, "mail_config.json")
+LOG_FILE = os.path.join(DATA_DIR, "mail_app.log")
+STATS_FILE = os.path.join(DATA_DIR, "mail_stats.json")
+SENT_HISTORY_FILE = os.path.join(DATA_DIR, "sent_history.json")
+RECEIVED_HISTORY_FILE = os.path.join(DATA_DIR, "received_history.json")
 
 
 def normalize_path(path):
@@ -358,9 +390,8 @@ class MailLogger:
     def __init__(self, log_folder):
         # Абсолютный путь к папке логов
         if not log_folder:
-            log_folder = os.path.dirname(os.path.abspath(__file__))
-            if not log_folder:
-                log_folder = os.getcwd()
+            # По умолчанию используем DATA_DIR для единообразия
+            log_folder = DATA_DIR
         self.log_folder = os.path.abspath(log_folder.strip())
         os.makedirs(self.log_folder, exist_ok=True)
 
@@ -2360,10 +2391,8 @@ class MainWindow:
         # Определяем папку для логов (абсолютный путь)
         log_folder = self.config.get("log_folder", "").strip()
         if not log_folder:
-            # По умолчанию — папка, где находится скрипт
-            log_folder = os.path.dirname(os.path.abspath(__file__))
-            if not log_folder:
-                log_folder = os.getcwd()
+            # По умолчанию — DATA_DIR (там же, где конфиг и статистика)
+            log_folder = DATA_DIR
         log_folder = os.path.abspath(log_folder)
         os.makedirs(log_folder, exist_ok=True)
         self.log_folder = log_folder
@@ -2592,9 +2621,8 @@ class MainWindow:
 
         log_folder = self.config.get("log_folder", "").strip()
         if not log_folder:
-            log_folder = os.path.dirname(os.path.abspath(__file__))
-            if not log_folder:
-                log_folder = os.getcwd()
+            # По умолчанию используем DATA_DIR для единообразия
+            log_folder = DATA_DIR
         log_folder = os.path.abspath(log_folder)
         os.makedirs(log_folder, exist_ok=True)
 
@@ -2711,9 +2739,8 @@ class MainWindow:
     def _backup_settings(self):
         """Резервное копирование настроек и логов в ZIP-архив"""
         try:
-            app_dir = os.path.dirname(os.path.abspath(__file__))
-            if not app_dir:
-                app_dir = os.getcwd()
+            # Используем DATA_DIR как основную директорию для файлов данных
+            app_dir = DATA_DIR
 
             # Файлы для резервного копирования
             backup_files = [
@@ -2764,9 +2791,8 @@ class MainWindow:
             return
 
         try:
-            app_dir = os.path.dirname(os.path.abspath(__file__))
-            if not app_dir:
-                app_dir = os.getcwd()
+            # Восстановление в DATA_DIR
+            app_dir = DATA_DIR
 
             # Проверяем содержимое архива
             with zipfile.ZipFile(file_path, 'r') as zf:
@@ -2810,9 +2836,8 @@ class MainWindow:
             return
 
         try:
-            app_dir = os.path.dirname(os.path.abspath(__file__))
-            if not app_dir:
-                app_dir = os.getcwd()
+            # Обновление в DATA_DIR
+            app_dir = DATA_DIR
 
             self.log_message(f"Обновление: выбран файл {file_path}")
 
